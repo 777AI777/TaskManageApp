@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f4f7fb;
+  --foreground: #122033;
+  --surface: #ffffff;
+  --muted: #6f7d92;
+  --border: #dbe3ef;
+  --accent: #2563eb;
+  --accent-foreground: #f8f9fe;
+  --danger: #d33d55;
+  --success: #0c9b79;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-noto-sans-jp);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-noto-sans-jp), sans-serif;
+  min-height: 100vh;
+}
+
+* {
+  border-color: var(--border);
+}
+
+.app-background {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top right, #d9ebff 0%, transparent 42%),
+    radial-gradient(circle at bottom left, #d9f8ef 0%, transparent 35%),
+    linear-gradient(180deg, #f4f7fb 0%, #ecf2fa 100%);
+}
+
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 35px rgb(18 32 51 / 0.08);
+}
+
+.input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.55rem 0.8rem;
+  background: #fff;
+  color: var(--foreground);
+  font-size: 0.92rem;
+}
+
+.input:focus {
+  outline: none;
+  border-color: #95b3eb;
+  box-shadow: 0 0 0 4px rgb(37 99 235 / 0.12);
+}
+
+.btn {
+  border-radius: 10px;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 120ms ease;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.btn-primary:hover {
+  background: #1f52be;
+}
+
+.btn-secondary {
+  background: #fff;
+  border-color: var(--border);
+}
+
+.btn-secondary:hover {
+  background: #f8fbff;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.chip {
+  border-radius: 100px;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  background: #f8faff;
+}

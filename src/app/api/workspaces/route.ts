@@ -1,0 +1,150 @@
+import { requireApiUser } from "@/lib/auth";
+import { parseBody } from "@/lib/api";
+import { defaultBoardTemplatePayload, applyBoardTemplate } from "@/lib/templates";
+import { ApiError, fail, ok } from "@/lib/http";
+import { slugify } from "@/lib/utils";
+import { workspaceCreateSchema } from "@/lib/validation/schemas";
+
+async function ensureProfileForUser(
+  supabase: Awaited<ReturnType<typeof requireApiUser>>["supabase"],
+  user: Awaited<ReturnType<typeof requireApiUser>>["user"],
+) {
+  if (!user.email) {
+    throw new ApiError(
+      400,
+      "profile_email_missing",
+      "Authenticated user does not have an email. Cannot create profile row.",
+    );
+  }
+
+  const metadataDisplayName =
+    typeof user.user_metadata?.display_name === "string" ? user.user_metadata.display_name : null;
+  const displayName = metadataDisplayName?.trim() || user.email.split("@")[0];
+
+  const { error } = await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      email: user.email,
+      display_name: displayName,
+    },
+    { onConflict: "id" },
+  );
+  if (error) {
+    throw new ApiError(500, "profile_upsert_failed", error.message);
+  }
+}
+
+export async function GET() {
+  try {
+    const { supabase, user } = await requireApiUser();
+    const { data: memberships, error } = await supabase
+      .from("workspace_members")
+      .select("workspace_id, role")
+      .eq("user_id", user.id);
+
+    if (error) {
+      throw new ApiError(500, "workspace_membership_lookup_failed", error.message);
+    }
+
+    const workspaceIds = (memberships ?? []).map((membership) => membership.workspace_id);
+    if (!workspaceIds.length) {
+      return ok([]);
+    }
+
+    const { data: workspaces, error: workspaceError } = await supabase
+      .from("workspaces")
+      .select("*")
+      .in("id", workspaceIds)
+      .order("created_at", { ascending: false });
+
+    if (workspaceError) {
+      throw new ApiError(500, "workspace_lookup_failed", workspaceError.message);
+    }
+
+    const roleMap = new Map((memberships ?? []).map((item) => [item.workspace_id, item.role]));
+    return ok(
+      (workspaces ?? []).map((workspace) => ({
+        ...workspace,
+        role: roleMap.get(workspace.id) ?? "member",
+      })),
+    );
+  } catch (error) {
+    return fail(error as Error);
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const payload = await parseBody(request, workspaceCreateSchema);
+    const { supabase, user } = await requireApiUser();
+    await ensureProfileForUser(supabase, user);
+    const slug = `${slugify(payload.name)}-${crypto.randomUUID().slice(0, 6)}`;
+
+    const { data: workspace, error: workspaceError } = await supabase
+      .from("workspaces")
+      .insert({
+        name: payload.name,
+        slug,
+        description: payload.description ?? null,
+        created_by: user.id,
+      })
+      .select("*")
+      .single();
+    if (workspaceError) {
+      throw new ApiError(500, "workspace_create_failed", workspaceError.message);
+    }
+
+    const { error: membershipError } = await supabase.from("workspace_members").insert({
+      workspace_id: workspace.id,
+      user_id: user.id,
+      role: "workspace_admin",
+      invited_by: user.id,
+    });
+    if (membershipError) {
+      throw new ApiError(500, "workspace_member_create_failed", membershipError.message);
+    }
+
+    const { data: board, error: boardError } = await supabase
+      .from("boards")
+      .insert({
+        workspace_id: workspace.id,
+        name: "開発ボード",
+        description: "初期テンプレート",
+        color: "#2563eb",
+        created_by: user.id,
+      })
+      .select("*")
+      .single();
+
+    if (boardError) {
+      throw new ApiError(500, "default_board_create_failed", boardError.message);
+    }
+
+    const { error: boardMemberError } = await supabase.from("board_members").insert({
+      board_id: board.id,
+      user_id: user.id,
+      role: "board_admin",
+    });
+    if (boardMemberError) {
+      throw new ApiError(500, "default_board_member_failed", boardMemberError.message);
+    }
+
+    await applyBoardTemplate(supabase, board.id, user.id, defaultBoardTemplatePayload());
+
+    const { error: templateError } = await supabase.from("templates").insert({
+      workspace_id: workspace.id,
+      created_by: user.id,
+      name: "標準開発テンプレート",
+      kind: "board",
+      payload: defaultBoardTemplatePayload(),
+      is_public: false,
+    });
+    if (templateError) {
+      throw new ApiError(500, "template_create_failed", templateError.message);
+    }
+
+    return ok({ workspace, defaultBoard: board }, { status: 201 });
+  } catch (error) {
+    return fail(error as Error);
+  }
+}
