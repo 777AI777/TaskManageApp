@@ -2,37 +2,9 @@ import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
 import { defaultBoardTemplatePayload, applyBoardTemplate } from "@/lib/templates";
 import { ApiError, fail, ok } from "@/lib/http";
+import { ensureProfileForUser } from "@/lib/profile";
 import { slugify } from "@/lib/utils";
 import { workspaceCreateSchema } from "@/lib/validation/schemas";
-
-async function ensureProfileForUser(
-  supabase: Awaited<ReturnType<typeof requireApiUser>>["supabase"],
-  user: Awaited<ReturnType<typeof requireApiUser>>["user"],
-) {
-  if (!user.email) {
-    throw new ApiError(
-      400,
-      "profile_email_missing",
-      "Authenticated user does not have an email. Cannot create profile row.",
-    );
-  }
-
-  const metadataDisplayName =
-    typeof user.user_metadata?.display_name === "string" ? user.user_metadata.display_name : null;
-  const displayName = metadataDisplayName?.trim() || user.email.split("@")[0];
-
-  const { error } = await supabase.from("profiles").upsert(
-    {
-      id: user.id,
-      email: user.email,
-      display_name: displayName,
-    },
-    { onConflict: "id" },
-  );
-  if (error) {
-    throw new ApiError(500, "profile_upsert_failed", error.message);
-  }
-}
 
 export async function GET() {
   try {
@@ -108,9 +80,11 @@ export async function POST(request: Request) {
       .from("boards")
       .insert({
         workspace_id: workspace.id,
-        name: "開発ボード",
-        description: "初期テンプレート",
+        name: "myTaskApp ボード",
+        slug: `board-${crypto.randomUUID().slice(0, 8)}`,
+        description: "初期ボード",
         color: "#2563eb",
+        visibility: "private",
         created_by: user.id,
       })
       .select("*")
@@ -134,7 +108,7 @@ export async function POST(request: Request) {
     const { error: templateError } = await supabase.from("templates").insert({
       workspace_id: workspace.id,
       created_by: user.id,
-      name: "標準開発テンプレート",
+      name: "既定テンプレート",
       kind: "board",
       payload: defaultBoardTemplatePayload(),
       is_public: false,

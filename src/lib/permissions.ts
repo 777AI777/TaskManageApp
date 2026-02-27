@@ -40,6 +40,7 @@ export async function resolveBoardRole(
     .from("boards")
     .select("workspace_id")
     .eq("id", boardId)
+    .eq("is_archived", false)
     .maybeSingle();
   if (boardError) {
     throw new ApiError(500, "board_lookup_failed", boardError.message);

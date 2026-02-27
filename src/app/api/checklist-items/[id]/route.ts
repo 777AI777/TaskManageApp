@@ -1,10 +1,86 @@
-import { requireApiUser } from "@/lib/auth";
+﻿import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
 import { logActivity } from "@/lib/activity";
 import { runAutomationForEvent } from "@/lib/automation/engine";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { checklistItemPatchSchema } from "@/lib/validation/schemas";
+
+type ChecklistItemContext = {
+  item: {
+    id: string;
+    checklist_id: string;
+  };
+  checklist: {
+    id: string;
+    card_id: string;
+  };
+  card: {
+    id: string;
+    board_id: string;
+    list_id: string;
+    priority: "low" | "medium" | "high" | "urgent";
+    due_at: string | null;
+  };
+  board: {
+    workspace_id: string;
+  };
+};
+
+async function loadChecklistItemContext(
+  supabase: Awaited<ReturnType<typeof requireApiUser>>["supabase"],
+  checklistItemId: string,
+): Promise<ChecklistItemContext> {
+  const { data: item, error: itemLookupError } = await supabase
+    .from("checklist_items")
+    .select("id, checklist_id")
+    .eq("id", checklistItemId)
+    .maybeSingle();
+  if (itemLookupError) {
+    throw new ApiError(500, "checklist_item_lookup_failed", itemLookupError.message);
+  }
+  if (!item) {
+    throw new ApiError(404, "checklist_item_not_found", "Checklist item not found.");
+  }
+
+  const { data: checklist, error: checklistLookupError } = await supabase
+    .from("checklists")
+    .select("id, card_id")
+    .eq("id", item.checklist_id)
+    .maybeSingle();
+  if (checklistLookupError) {
+    throw new ApiError(500, "checklist_lookup_failed", checklistLookupError.message);
+  }
+  if (!checklist) {
+    throw new ApiError(404, "checklist_not_found", "Checklist not found.");
+  }
+
+  const { data: card, error: cardLookupError } = await supabase
+    .from("cards")
+    .select("id, board_id, list_id, priority, due_at")
+    .eq("id", checklist.card_id)
+    .maybeSingle();
+  if (cardLookupError) {
+    throw new ApiError(500, "card_lookup_failed", cardLookupError.message);
+  }
+  if (!card) {
+    throw new ApiError(404, "card_not_found", "Card not found.");
+  }
+
+  const { data: board, error: boardLookupError } = await supabase
+    .from("boards")
+    .select("workspace_id")
+    .eq("id", card.board_id)
+    .maybeSingle();
+  if (boardLookupError) {
+    throw new ApiError(500, "board_lookup_failed", boardLookupError.message);
+  }
+  if (!board) {
+    throw new ApiError(404, "board_not_found", "Board not found.");
+  }
+
+  return { item, checklist, card, board };
+}
 
 export async function PATCH(
   request: Request,
@@ -14,55 +90,23 @@ export async function PATCH(
     const { id } = await params;
     const payload = await parseBody(request, checklistItemPatchSchema);
     const { supabase, user } = await requireApiUser();
-
-    const { data: item, error: itemLookupError } = await supabase
-      .from("checklist_items")
-      .select("id, checklist_id")
-      .eq("id", id)
-      .maybeSingle();
-    if (itemLookupError) {
-      throw new ApiError(500, "checklist_item_lookup_failed", itemLookupError.message);
-    }
-    if (!item) {
-      throw new ApiError(404, "checklist_item_not_found", "チェックリスト項目が見つかりません。");
-    }
-
-    const { data: checklist, error: checklistLookupError } = await supabase
-      .from("checklists")
-      .select("id, card_id")
-      .eq("id", item.checklist_id)
-      .maybeSingle();
-    if (checklistLookupError) {
-      throw new ApiError(500, "checklist_lookup_failed", checklistLookupError.message);
-    }
-    if (!checklist) {
-      throw new ApiError(404, "checklist_not_found", "チェックリストが見つかりません。");
-    }
-
-    const { data: card, error: cardLookupError } = await supabase
-      .from("cards")
-      .select("id, board_id, list_id, priority, due_at")
-      .eq("id", checklist.card_id)
-      .maybeSingle();
-    if (cardLookupError) {
-      throw new ApiError(500, "card_lookup_failed", cardLookupError.message);
-    }
-    if (!card) {
-      throw new ApiError(404, "card_not_found", "カードが見つかりません。");
-    }
+    const { checklist, card, board } = await loadChecklistItemContext(supabase, id);
 
     await assertBoardRole(supabase, card.board_id, user.id, ["member"]);
 
-    const { data: board, error: boardLookupError } = await supabase
-      .from("boards")
-      .select("workspace_id")
-      .eq("id", card.board_id)
-      .maybeSingle();
-    if (boardLookupError) {
-      throw new ApiError(500, "board_lookup_failed", boardLookupError.message);
-    }
-    if (!board) {
-      throw new ApiError(404, "board_not_found", "ボードが見つかりません。");
+    if (payload.assigneeId !== undefined && payload.assigneeId !== null) {
+      const { data: assigneeMembership, error: assigneeMembershipError } = await supabase
+        .from("board_members")
+        .select("user_id")
+        .eq("board_id", card.board_id)
+        .eq("user_id", payload.assigneeId)
+        .maybeSingle();
+      if (assigneeMembershipError) {
+        throw new ApiError(500, "assignee_lookup_failed", assigneeMembershipError.message);
+      }
+      if (!assigneeMembership) {
+        throw new ApiError(400, "invalid_assignee", "Assignee must be a board member.");
+      }
     }
 
     const updatePayload: Record<string, unknown> = {
@@ -70,6 +114,8 @@ export async function PATCH(
     };
     if (payload.content !== undefined) updatePayload.content = payload.content;
     if (payload.position !== undefined) updatePayload.position = payload.position;
+    if (payload.assigneeId !== undefined) updatePayload.assignee_id = payload.assigneeId;
+    if (payload.dueAt !== undefined) updatePayload.due_at = payload.dueAt;
     if (payload.isCompleted !== undefined) {
       updatePayload.is_completed = payload.isCompleted;
       updatePayload.completed_by = payload.isCompleted ? user.id : null;
@@ -127,6 +173,39 @@ export async function PATCH(
     }
 
     return ok(updatedItem);
+  } catch (error) {
+    return fail(error as Error);
+  }
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const { id } = await params;
+    const { supabase, user } = await requireApiUser();
+    const { checklist, card } = await loadChecklistItemContext(supabase, id);
+
+    await assertBoardRole(supabase, card.board_id, user.id, ["member"]);
+
+    const { error: deleteError } = await supabase
+      .from("checklist_items")
+      .delete()
+      .eq("id", id);
+    if (deleteError) {
+      throw new ApiError(500, "checklist_item_delete_failed", deleteError.message);
+    }
+
+    await logActivity(supabase, {
+      boardId: card.board_id,
+      cardId: checklist.card_id,
+      actorId: user.id,
+      action: "checklist_item_deleted",
+      metadata: { checklistItemId: id },
+    });
+
+    return ok({ id });
   } catch (error) {
     return fail(error as Error);
   }

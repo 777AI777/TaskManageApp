@@ -1,9 +1,21 @@
 "use client";
 
+import { X } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
-export function CreateWorkspaceForm() {
+type CreateWorkspaceFormProps = {
+  mode?: "inline" | "modal";
+  open?: boolean;
+  onCloseHref?: string;
+};
+
+export function CreateWorkspaceForm({
+  mode = "inline",
+  open = true,
+  onCloseHref = "/u/me/boards",
+}: CreateWorkspaceFormProps = {}) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -29,7 +41,15 @@ export function CreateWorkspaceForm() {
       }
       setName("");
       setDescription("");
-      router.push(`/app/workspaces/${body.data.workspace.id}`);
+      const workspaceSlug = body?.data?.workspace?.slug;
+      const workspaceId = body?.data?.workspace?.id;
+      router.push(
+        workspaceSlug
+          ? `/w/${workspaceSlug}/home`
+          : workspaceId
+            ? `/app/workspaces/${workspaceId}`
+            : "/u/me/boards",
+      );
       router.refresh();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Workspace作成に失敗しました。");
@@ -38,9 +58,27 @@ export function CreateWorkspaceForm() {
     }
   }
 
-  return (
-    <form className="surface p-4" onSubmit={handleSubmit}>
-      <h2 className="text-lg font-semibold">新規ワークスペース作成</h2>
+  if (mode === "modal" && !open) {
+    return null;
+  }
+
+  const body = (
+    <form className={mode === "modal" ? "myTaskApp-create-board-modal" : "surface p-4"} onSubmit={handleSubmit}>
+      {mode === "modal" ? (
+        <div className="myTaskApp-create-board-header">
+          <h2 className="text-xl font-semibold text-slate-900">新規ワークスペース作成</h2>
+          <Link
+            href={onCloseHref}
+            aria-label="閉じる"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100"
+          >
+            <X size={18} />
+          </Link>
+        </div>
+      ) : (
+        <h2 className="text-lg font-semibold">新規ワークスペース作成</h2>
+      )}
+
       <div className="mt-3 space-y-3">
         <div>
           <label className="mb-1 block text-sm font-medium">名前</label>
@@ -58,14 +96,20 @@ export function CreateWorkspaceForm() {
             className="input min-h-20"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            placeholder="運用方針や目的を記載"
+            placeholder="用途や運用ルールを記載"
           />
         </div>
         {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        <button className="btn btn-primary" type="submit" disabled={loading}>
+        <button className={`btn btn-primary ${mode === "modal" ? "w-full" : ""}`} type="submit" disabled={loading}>
           {loading ? "作成中..." : "作成"}
         </button>
       </div>
     </form>
   );
+
+  if (mode === "modal") {
+    return <div className="myTaskApp-create-board-modal-backdrop">{body}</div>;
+  }
+
+  return body;
 }

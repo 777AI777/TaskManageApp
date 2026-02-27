@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const { user } = await getServerAuth();
   if (user) {
-    redirect("/app/workspaces");
+    redirect("/u/me/boards");
   }
   redirect("/login");
 }

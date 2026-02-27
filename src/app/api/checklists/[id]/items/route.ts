@@ -40,6 +40,21 @@ export async function POST(
 
     await assertBoardRole(supabase, card.board_id, user.id, ["member"]);
 
+    if (payload.assigneeId !== undefined && payload.assigneeId !== null) {
+      const { data: assigneeMembership, error: assigneeMembershipError } = await supabase
+        .from("board_members")
+        .select("user_id")
+        .eq("board_id", card.board_id)
+        .eq("user_id", payload.assigneeId)
+        .maybeSingle();
+      if (assigneeMembershipError) {
+        throw new ApiError(500, "assignee_lookup_failed", assigneeMembershipError.message);
+      }
+      if (!assigneeMembership) {
+        throw new ApiError(400, "invalid_assignee", "Assignee must be a board member.");
+      }
+    }
+
     const { data: latestItem } = await supabase
       .from("checklist_items")
       .select("position")
@@ -55,6 +70,8 @@ export async function POST(
         checklist_id: id,
         content: payload.content,
         position: nextPosition,
+        assignee_id: payload.assigneeId ?? null,
+        due_at: payload.dueAt ?? null,
       })
       .select("*")
       .single();

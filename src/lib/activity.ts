@@ -19,26 +19,31 @@ type NotificationInput = {
 };
 
 export async function logActivity(supabase: SupabaseClient, input: ActivityInput) {
-  await supabase.from("activities").insert({
+  const payload = {
     board_id: input.boardId,
     card_id: input.cardId ?? null,
     actor_id: input.actorId,
-    action: input.action,
-    metadata: input.metadata ?? {},
-  });
+  };
+  const metadata = input.metadata ?? {};
+
+  await Promise.all([
+    supabase.from("activities").insert({
+      ...payload,
+      action: input.action,
+      metadata,
+    }),
+    supabase.from("card_activity").insert({
+      ...payload,
+      action_type: input.action,
+      payload: metadata,
+    }),
+  ]);
 }
 
 export async function createNotification(
-  supabase: SupabaseClient,
-  input: NotificationInput,
+  _supabase: SupabaseClient,
+  _input: NotificationInput,
 ) {
-  await supabase.from("notifications").insert({
-    user_id: input.userId,
-    workspace_id: input.workspaceId,
-    board_id: input.boardId ?? null,
-    card_id: input.cardId ?? null,
-    type: input.type,
-    message: input.message,
-    payload: input.payload ?? {},
-  });
+  // Notification feature is temporarily disabled.
+  return;
 }

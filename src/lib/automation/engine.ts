@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+﻿import type { SupabaseClient } from "@supabase/supabase-js";
 import { addHours } from "date-fns";
 
 import type { AutomationAction, AutomationTrigger, Card } from "@/lib/types";
@@ -148,22 +148,9 @@ async function executeAction(
       });
       return;
     }
-    case "notify": {
-      const userId = getPayloadString(payload, "userId");
-      if (!userId) {
-        return;
-      }
-      await supabase.from("notifications").insert({
-        user_id: userId,
-        workspace_id: event.workspaceId,
-        board_id: event.boardId,
-        card_id: event.card.id,
-        type: "automation",
-        message: `自動化ルールによりカード「${event.card.id}」が更新されました。`,
-        payload,
-      });
+    case "notify":
+      // Notification feature is temporarily disabled.
       return;
-    }
     default:
       return;
   }
@@ -255,3 +242,5 @@ export async function runAutomationForEvent(
     }
   }
 }
+
+

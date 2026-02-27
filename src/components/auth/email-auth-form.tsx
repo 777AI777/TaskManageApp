@@ -21,7 +21,7 @@ export function EmailAuthForm({ mode }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const inviteToken = searchParams.get("invite");
-  const nextPath = searchParams.get("next") ?? "/app/workspaces";
+  const nextPath = searchParams.get("next") ?? "/u/me/boards";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

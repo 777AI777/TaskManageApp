@@ -5,12 +5,14 @@ import { parseBody } from "@/lib/api";
 import { applyBoardTemplate, defaultBoardTemplatePayload } from "@/lib/templates";
 import { ApiError, fail, ok, parseJsonSafely } from "@/lib/http";
 import { assertWorkspaceRole } from "@/lib/permissions";
+import { slugify } from "@/lib/utils";
 
 const boardCreatePayloadSchema = z.object({
   name: z.string().min(2).max(100),
   description: z.string().max(500).nullable().optional(),
   color: z.string().max(32).nullable().optional(),
   templateId: z.uuid().nullable().optional(),
+  visibility: z.enum(["private", "workspace", "public"]).optional(),
 });
 
 export async function POST(
@@ -22,14 +24,17 @@ export async function POST(
     const payload = await parseBody(request, boardCreatePayloadSchema);
     const { supabase, user } = await requireApiUser();
     await assertWorkspaceRole(supabase, workspaceId, user.id, ["member"]);
+    const slugBase = slugify(payload.name) || "board";
 
     const { data: board, error: boardError } = await supabase
       .from("boards")
       .insert({
         workspace_id: workspaceId,
         name: payload.name,
+        slug: `${slugBase}-${crypto.randomUUID().slice(0, 6)}`,
         description: payload.description ?? null,
         color: payload.color ?? "#2563eb",
+        visibility: payload.visibility ?? "private",
         created_by: user.id,
       })
       .select("*")

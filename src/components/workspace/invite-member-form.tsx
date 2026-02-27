@@ -2,22 +2,32 @@
 
 import { FormEvent, useState } from "react";
 
+type Role = "workspace_admin" | "board_admin" | "member";
+
 type Props = {
   workspaceId: string;
 };
 
+type InviteResponseData = {
+  mode?: "direct_member_add" | "invite_link";
+  inviteUrl?: string;
+  message?: string;
+};
+
 export function InviteMemberForm({ workspaceId }: Props) {
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<"workspace_admin" | "board_admin" | "member">("member");
-  const [inviteUrl, setInviteUrl] = useState<string | null>(null);
+  const [role, setRole] = useState<Role>("member");
+  const [fallbackInviteUrl, setFallbackInviteUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setError(null);
-    setInviteUrl(null);
+    setSuccess(null);
+    setFallbackInviteUrl(null);
     try {
       const response = await fetch("/api/auth/invite", {
         method: "POST",
@@ -30,12 +40,19 @@ export function InviteMemberForm({ workspaceId }: Props) {
       });
       const body = await response.json();
       if (!response.ok) {
-        throw new Error(body?.error?.message ?? "招待作成に失敗しました。");
+        throw new Error(body?.error?.message ?? "招待送信に失敗しました。");
       }
-      setInviteUrl(body.data.inviteUrl);
+
+      const data = (body?.data ?? {}) as InviteResponseData;
+      if (data.mode === "invite_link" && data.inviteUrl) {
+        setSuccess(data.message ?? "招待リンクを作成しました。");
+        setFallbackInviteUrl(data.inviteUrl);
+      } else {
+        setSuccess(data.message ?? "招待を送信しました。");
+      }
       setEmail("");
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "招待作成に失敗しました。");
+      setError(submitError instanceof Error ? submitError.message : "招待送信に失敗しました。");
     } finally {
       setLoading(false);
     }
@@ -58,7 +75,7 @@ export function InviteMemberForm({ workspaceId }: Props) {
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium">権限</label>
-          <select className="input h-11" value={role} onChange={(event) => setRole(event.target.value as typeof role)}>
+          <select className="input h-11" value={role} onChange={(event) => setRole(event.target.value as Role)}>
             <option value="member">メンバー</option>
             <option value="board_admin">ボード管理者</option>
             <option value="workspace_admin">ワークスペース管理者</option>
@@ -68,12 +85,12 @@ export function InviteMemberForm({ workspaceId }: Props) {
 
       <div className="mt-4 flex items-center gap-3">
         <button className="btn btn-primary" type="submit" disabled={loading}>
-          {loading ? "生成中..." : "招待リンク生成"}
+          {loading ? "送信中..." : "招待を送信"}
         </button>
-        {inviteUrl ? (
+        {fallbackInviteUrl ? (
           <a
             className="text-sm font-semibold text-blue-700 underline underline-offset-2"
-            href={inviteUrl}
+            href={fallbackInviteUrl}
             target="_blank"
             rel="noreferrer"
           >
@@ -82,8 +99,9 @@ export function InviteMemberForm({ workspaceId }: Props) {
         ) : null}
       </div>
 
-      {inviteUrl ? (
-        <p className="mt-2 break-all rounded-md bg-slate-100 px-3 py-2 font-mono text-xs">{inviteUrl}</p>
+      {success ? <p className="mt-2 text-sm text-emerald-700">{success}</p> : null}
+      {fallbackInviteUrl ? (
+        <p className="mt-2 break-all rounded-md bg-slate-100 px-3 py-2 font-mono text-xs">{fallbackInviteUrl}</p>
       ) : null}
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
     </form>

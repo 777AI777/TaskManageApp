@@ -1,5 +1,21 @@
 import { requireApiUser } from "@/lib/auth";
 import { ApiError, fail, ok } from "@/lib/http";
+import { ensureProfileForUser } from "@/lib/profile";
+import { createSupabaseAdminClient } from "@/lib/supabase/server";
+
+function requireInviteAdminClient() {
+  try {
+    return createSupabaseAdminClient();
+  } catch (error) {
+    throw new ApiError(
+      500,
+      "missing_service_role_key",
+      error instanceof Error
+        ? error.message
+        : "SUPABASE_SERVICE_ROLE_KEY is required for invite acceptance.",
+    );
+  }
+}
 
 export async function POST(
   _request: Request,
@@ -40,7 +56,10 @@ export async function POST(
       );
     }
 
-    const { error: memberError } = await supabase.from("workspace_members").upsert(
+    await ensureProfileForUser(supabase, user);
+    const admin = requireInviteAdminClient();
+
+    const { error: memberError } = await admin.from("workspace_members").upsert(
       {
         workspace_id: invite.workspace_id,
         user_id: user.id,
@@ -54,7 +73,7 @@ export async function POST(
       throw new ApiError(500, "workspace_join_failed", memberError.message);
     }
 
-    const { data: boards, error: boardsError } = await supabase
+    const { data: boards, error: boardsError } = await admin
       .from("boards")
       .select("id")
       .eq("workspace_id", invite.workspace_id);
@@ -63,7 +82,7 @@ export async function POST(
     }
 
     if (boards?.length) {
-      const { error: boardMemberError } = await supabase.from("board_members").upsert(
+      const { error: boardMemberError } = await admin.from("board_members").upsert(
         boards.map((board) => ({
           board_id: board.id,
           user_id: user.id,
@@ -76,7 +95,7 @@ export async function POST(
       }
     }
 
-    const { error: inviteUpdateError } = await supabase
+    const { error: inviteUpdateError } = await admin
       .from("invites")
       .update({
         status: "accepted",

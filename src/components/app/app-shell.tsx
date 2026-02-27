@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { PropsWithChildren } from "react";
 
 import { SignOutButton } from "@/components/app/sign-out-button";
@@ -10,14 +10,12 @@ type WorkspaceSummary = {
 
 type AppShellProps = PropsWithChildren<{
   userEmail: string;
-  unreadNotifications: number;
   workspaces: WorkspaceSummary[];
 }>;
 
 export function AppShell({
   children,
   userEmail,
-  unreadNotifications,
   workspaces,
 }: AppShellProps) {
   return (
@@ -25,21 +23,13 @@ export function AppShell({
       <aside className="surface hidden w-72 flex-none p-4 lg:block">
         <div className="mb-4">
           <p className="chip mb-2 inline-flex">TaskManageApp</p>
-          <h1 className="text-lg font-bold">開発タスク管理</h1>
+          <h1 className="text-lg font-bold">タスク管理</h1>
           <p className="mt-1 text-xs muted">{userEmail}</p>
         </div>
 
         <nav className="space-y-1">
           <Link className="block rounded-md px-3 py-2 text-sm hover:bg-blue-50" href="/app/workspaces">
             ワークスペース
-          </Link>
-          <Link className="flex items-center justify-between rounded-md px-3 py-2 text-sm hover:bg-blue-50" href="/app/notifications">
-            通知
-            {unreadNotifications > 0 ? (
-              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800">
-                {unreadNotifications}
-              </span>
-            ) : null}
           </Link>
         </nav>
 
@@ -72,3 +62,4 @@ export function AppShell({
     </div>
   );
 }
+

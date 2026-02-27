@@ -14,7 +14,12 @@ export async function GET(
     const [{ data: workspace }, { data: boards }, { data: members }, { data: templates }] =
       await Promise.all([
         supabase.from("workspaces").select("*").eq("id", id).maybeSingle(),
-        supabase.from("boards").select("*").eq("workspace_id", id).order("created_at", { ascending: true }),
+        supabase
+          .from("boards")
+          .select("*")
+          .eq("workspace_id", id)
+          .eq("is_archived", false)
+          .order("created_at", { ascending: true }),
         supabase
           .from("workspace_members")
           .select("workspace_id, user_id, role, joined_at")
@@ -34,7 +39,7 @@ export async function GET(
     const { data: profiles, error: profilesError } = memberIds.length
       ? await supabase
           .from("profiles")
-          .select("id, email, display_name, avatar_url")
+          .select("id, email, display_name, avatar_url, avatar_color")
           .in("id", memberIds)
       : { data: [], error: null };
 

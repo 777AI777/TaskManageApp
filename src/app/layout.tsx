@@ -16,7 +16,7 @@ const jetBrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "TaskManageApp",
-  description: "Trello-like development task management on Supabase + Vercel",
+  description: "myTaskApp-like development task management on Supabase + Vercel",
 };
 
 export default function RootLayout({

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 
 import { RuleManager } from "@/components/automation/rule-manager";
 import { requireServerUser } from "@/lib/auth";
@@ -11,6 +12,18 @@ export default async function BoardAutomationPage({
 }) {
   const { workspaceId, boardId } = await params;
   const { supabase, user } = await requireServerUser();
+
+  const { data: board } = await supabase
+    .from("boards")
+    .select("id")
+    .eq("id", boardId)
+    .eq("workspace_id", workspaceId)
+    .eq("is_archived", false)
+    .maybeSingle();
+  if (!board) {
+    notFound();
+  }
+
   await assertBoardRole(supabase, boardId, user.id, ["board_admin"]);
 
   const { data: rules } = await supabase

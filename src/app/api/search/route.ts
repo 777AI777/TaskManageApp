@@ -23,7 +23,8 @@ export async function GET(request: Request) {
     const { data: boards, error: boardError } = await supabase
       .from("boards")
       .select("id")
-      .eq("workspace_id", workspaceId);
+      .eq("workspace_id", workspaceId)
+      .eq("is_archived", false);
     if (boardError) {
       throw new ApiError(500, "board_lookup_failed", boardError.message);
     }

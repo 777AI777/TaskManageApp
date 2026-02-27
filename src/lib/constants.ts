@@ -1,11 +1,11 @@
 import type { CardPriority } from "@/lib/types";
 
 export const DEFAULT_BOARD_LISTS = [
-  { name: "Backlog", position: 1000 },
-  { name: "ToDo", position: 2000 },
-  { name: "In Progress", position: 3000 },
-  { name: "Review", position: 4000 },
-  { name: "Done", position: 5000 },
+  { name: "バックログ", position: 1000 },
+  { name: "未着手", position: 2000 },
+  { name: "進行中", position: 3000 },
+  { name: "確認待ち", position: 4000 },
+  { name: "完了", position: 5000 },
 ] as const;
 
 export const PRIORITY_OPTIONS: { value: CardPriority; label: string }[] = [
