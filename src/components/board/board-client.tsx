@@ -29,14 +29,18 @@ import {
   GitBranch,
   GripVertical,
   Kanban,
+  MessageSquare,
+  Plus,
   Table,
   X,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CalendarView } from "@/components/board/calendar-view";
+import { BoardChatPanel } from "@/components/board/board-chat-panel";
 import { CardDetailDrawer } from "@/components/board/card-detail-drawer";
 import { TableView } from "@/components/board/table-view";
 import { TimelineView } from "@/components/board/timeline-view";
@@ -53,6 +57,7 @@ import type {
   BoardList,
   CardCustomFieldValue,
   CardWatcher,
+  BoardChatMessage,
   CustomField,
   BoardCardMeta,
 } from "@/components/board/board-types";
@@ -71,12 +76,25 @@ import {
 import {
   canManageBoard,
   getReorderedItemPosition,
+  matchesCardListFilters,
+  matchesCardStatusFilters,
   matchesDueBucket,
   resolveCardDeadlineState,
+  type CardListFilters,
+  type CardStatusFilters,
   type DueBucket,
 } from "@/lib/board-utils";
 import { resolveAvatarColor } from "@/lib/avatar-color";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  applyTableSortStateToSearchParams,
+  getNextTableSortState,
+  parseTableSortState,
+  type TableSortDirection,
+  type TableSortKey,
+  type TableSortState,
+} from "@/lib/table-sort";
+import { formatTaskDisplayId } from "@/lib/task-id";
 import {
   addDays,
   deltaXToDayShift,
@@ -95,10 +113,8 @@ type MemberFilters = {
   assignedToMe: boolean;
   memberIds: string[];
 };
-type StatusFilters = {
-  completed: boolean;
-  dueIncomplete: boolean;
-};
+type StatusFilters = CardStatusFilters;
+type ListFilters = CardListFilters;
 type LabelFilters = {
   noLabel: boolean;
   labelIds: string[];
@@ -131,14 +147,13 @@ type ViewMenuItem = {
 };
 const UNIFIED_BOARD_BACKGROUND = "#c0c5d1";
 const DEFAULT_MEMBER_FILTERS: MemberFilters = { unassigned: false, assignedToMe: false, memberIds: [] };
-const DEFAULT_STATUS_FILTERS: StatusFilters = { completed: false, dueIncomplete: false };
+const DEFAULT_STATUS_FILTERS: StatusFilters = { completed: false, nonCompleted: false };
+const DEFAULT_LIST_FILTERS: ListFilters = { listIds: [] };
 const DEFAULT_LABEL_FILTERS: LabelFilters = { noLabel: false, labelIds: [] };
 const DUE_FILTER_OPTIONS: Array<{ value: DueBucket; label: string; tone: "neutral" | "danger" | "warning" }> = [
   { value: "no-due-date", label: "\u671f\u9650\u306a\u3057", tone: "neutral" },
   { value: "overdue", label: "\u671f\u9650\u5207\u308c", tone: "danger" },
   { value: "due-until-next-day", label: "\u660e\u65e5\u307e\u3067\u306e\u671f\u9650\u3042\u308a", tone: "warning" },
-  { value: "due-until-next-week", label: "\u6765\u9031\u307e\u3067\u306e\u671f\u9650\u3042\u308a", tone: "neutral" },
-  { value: "due-until-next-month", label: "\u6765\u6708\u307e\u3067\u306e\u671f\u9650\u3042\u308a", tone: "neutral" },
 ];
 
 const VIEW_MENU_ITEMS: ViewMenuItem[] = [
@@ -149,6 +164,13 @@ const VIEW_MENU_ITEMS: ViewMenuItem[] = [
 ];
 const LIST_COLUMN_DND_PREFIX = "list-column:";
 const LIST_REORDER_ERROR_MESSAGE = "Failed to reorder list.";
+const BOARD_CHAT_PAGE_SIZE = 50;
+
+type BoardChatPageData = {
+  messages: BoardChatMessage[];
+  hasMore: boolean;
+  nextBefore: string | null;
+};
 
 function getListColumnDndId(listId: string): string {
   return `${LIST_COLUMN_DND_PREFIX}${listId}`;
@@ -308,9 +330,103 @@ function toDueAtIsoFromDate(value: string): string | null {
   return dueAt.toISOString();
 }
 
+function compareBoardChatMessage(left: BoardChatMessage, right: BoardChatMessage): number {
+  const leftTime = new Date(left.created_at).getTime();
+  const rightTime = new Date(right.created_at).getTime();
+  if (leftTime !== rightTime) return leftTime - rightTime;
+  return left.id.localeCompare(right.id);
+}
+
+function upsertBoardChatMessage(messages: BoardChatMessage[], nextMessage: BoardChatMessage): BoardChatMessage[] {
+  const index = messages.findIndex((message) => message.id === nextMessage.id);
+  if (index === -1) {
+    return [...messages, nextMessage].sort(compareBoardChatMessage);
+  }
+  const next = [...messages];
+  next[index] = nextMessage;
+  return next.sort(compareBoardChatMessage);
+}
+
 function areStringArraysEqual(left: string[], right: string[]): boolean {
   if (left.length !== right.length) return false;
   return left.every((value, index) => value === right[index]);
+}
+
+const TABLE_SORT_COLLATOR = new Intl.Collator("ja-JP", {
+  numeric: true,
+  sensitivity: "base",
+});
+
+function normalizeSortableNameList(values: string[]): string | null {
+  if (!values.length) return null;
+  return [...values].sort(TABLE_SORT_COLLATOR.compare).join(" ");
+}
+
+function isEmptyTableSortValue(value: string | number | boolean | null): boolean {
+  if (value === null) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  return false;
+}
+
+function compareTableSortValues(
+  left: string | number | boolean | null,
+  right: string | number | boolean | null,
+  direction: TableSortDirection,
+): number {
+  const leftEmpty = isEmptyTableSortValue(left);
+  const rightEmpty = isEmptyTableSortValue(right);
+  if (leftEmpty || rightEmpty) {
+    if (leftEmpty && rightEmpty) return 0;
+    return leftEmpty ? 1 : -1;
+  }
+
+  let compared = 0;
+  if (typeof left === "string" && typeof right === "string") {
+    compared = TABLE_SORT_COLLATOR.compare(left, right);
+  } else if (typeof left === "number" && typeof right === "number") {
+    compared = left - right;
+  } else if (typeof left === "boolean" && typeof right === "boolean") {
+    compared = Number(left) - Number(right);
+  } else {
+    compared = TABLE_SORT_COLLATOR.compare(String(left), String(right));
+  }
+
+  return direction === "asc" ? compared : -compared;
+}
+
+function toSortableTimestamp(value: string | null): number | null {
+  if (!value) return null;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function resolveCustomFieldSortValue(
+  field: CustomField | undefined,
+  value: CardCustomFieldValue | undefined,
+): string | number | boolean | null {
+  if (!field || !value) return null;
+
+  if (field.field_type === "text") {
+    return value.value_text?.trim() || null;
+  }
+
+  if (field.field_type === "number") {
+    return value.value_number ?? null;
+  }
+
+  if (field.field_type === "date") {
+    return toSortableTimestamp(value.value_date);
+  }
+
+  if (field.field_type === "checkbox") {
+    return value.value_boolean === null ? null : Boolean(value.value_boolean);
+  }
+
+  if (field.field_type === "select") {
+    return value.value_option?.trim() || null;
+  }
+
+  return null;
 }
 
 function toAssigneeInitial(name: string | null): string | null {
@@ -321,22 +437,34 @@ function toAssigneeInitial(name: string | null): string | null {
 
 function CardPresentation({
   card,
+  boardCode,
   meta,
 }: {
   card: BoardCard;
+  boardCode: string;
   meta: BoardCardMeta | undefined;
 }) {
+  const taskId = formatTaskDisplayId(boardCode, card.task_number);
   return (
     <>
-      <div className="tm-card-drag-row" aria-hidden="true">
-        <span className="tm-card-drag-handle">
-          <GripVertical size={14} />
-        </span>
+      <div className="tm-card-drag-row">
+        <p className="tm-task-id-label">{taskId}</p>
+        <div className="flex items-center gap-2">
+          {meta?.dueLabel ? (
+            <span className={`tm-task-state-chip tm-task-state-${meta.deadlineState}`}>
+              <Clock3 size={12} />
+              <span>{meta.dueLabel}</span>
+            </span>
+          ) : null}
+          <span className="tm-card-drag-handle" aria-hidden="true">
+            <GripVertical size={14} />
+          </span>
+        </div>
       </div>
       {card.cover_type === "color" && card.cover_value ? (
         <div className="mb-2 h-7 rounded-md" style={{ backgroundColor: card.cover_value }} />
       ) : null}
-      <div className="min-w-0 flex-1 space-y-2">
+      <div className="min-w-0 flex-1">
         <div className="tm-card-main-row">
           <p
             className={`tm-card-title-clamp text-sm font-semibold ${card.archived ? "opacity-70" : ""}`}
@@ -355,14 +483,6 @@ function CardPresentation({
             </span>
           ) : null}
         </div>
-        <div className="tm-task-meta-row">
-          {meta?.dueLabel ? (
-            <span className={`tm-task-state-chip tm-task-state-${meta.deadlineState}`}>
-              <Clock3 size={12} />
-              <span>{meta.dueLabel}</span>
-            </span>
-          ) : null}
-        </div>
       </div>
     </>
   );
@@ -370,10 +490,12 @@ function CardPresentation({
 
 function DnDCard({
   card,
+  boardCode,
   meta,
   onOpen,
 }: {
   card: BoardCard;
+  boardCode: string;
   meta: BoardCardMeta | undefined;
   onOpen: (id: string) => void;
 }) {
@@ -389,13 +511,14 @@ function DnDCard({
       {...listeners}
       {...attributes}
     >
-      <CardPresentation card={card} meta={meta} />
+      <CardPresentation card={card} boardCode={boardCode} meta={meta} />
     </article>
   );
 }
 function Column({
   list,
   cards,
+  boardCode,
   cardMetaById,
   onOpen,
   draft,
@@ -407,6 +530,7 @@ function Column({
 }: {
   list: BoardList;
   cards: BoardCard[];
+  boardCode: string;
   cardMetaById: Map<string, BoardCardMeta>;
   onOpen: (id: string) => void;
   draft: string;
@@ -496,7 +620,7 @@ function Column({
     <section
       ref={setSortableNodeRef}
       style={style}
-      className={`tm-list-column tm-list-column-sortable ${isOver ? "ring-2 ring-blue-400" : ""} ${
+      className={`tm-list-column tm-list-column-app tm-list-column-sortable ${isOver ? "ring-2 ring-blue-400" : ""} ${
         isDragging ? "tm-list-column-sortable-dragging" : ""
       }`}
     >
@@ -556,19 +680,27 @@ function Column({
           ) : null}
         </div>
       </div>
-      <div ref={setCardDropNodeRef}>
-        <div className="flex min-h-24 flex-1 flex-col gap-2">
-          {cards.map((card) => (
-            <DnDCard
-              key={card.id}
-              card={card}
-              meta={cardMetaById.get(card.id)}
-              onOpen={onOpen}
-            />
-          ))}
+      <div ref={setCardDropNodeRef} className="tm-list-column-body">
+        <div className="tm-list-column-scroll">
+          <div className="flex min-h-24 flex-col gap-2">
+            {cards.map((card) => (
+              <DnDCard
+                key={card.id}
+                card={card}
+                boardCode={boardCode}
+                meta={cardMetaById.get(card.id)}
+                onOpen={onOpen}
+              />
+            ))}
+          </div>
         </div>
-        <form className="mt-3 space-y-2" onSubmit={onCreate}>
-          <input className="tm-input" value={draft} onChange={(event) => onDraft(event.target.value)} placeholder={"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"} />
+        <form className="tm-list-column-footer" onSubmit={onCreate}>
+          <input
+            className="tm-input"
+            value={draft}
+            onChange={(event) => onDraft(event.target.value)}
+            placeholder={"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"}
+          />
           <button className="tm-button tm-button-secondary w-full" type="submit">
             {"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"}
           </button>
@@ -586,6 +718,9 @@ export function BoardClient({
   initialCardId?: string | null;
 }) {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const dndContextId = `board-dnd-${initialData.board.id}`;
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -642,6 +777,7 @@ export function BoardClient({
     });
   }, []);
   const viewPickerRef = useRef<HTMLDivElement | null>(null);
+  const headerTaskAddRef = useRef<HTMLDivElement | null>(null);
   const timelineDragStartXRef = useRef<number | null>(null);
   const timelineDragSnapshotRef = useRef<TimelineDragSnapshot | null>(null);
 
@@ -657,6 +793,21 @@ export function BoardClient({
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [boardChatMessages, setBoardChatMessages] = useState<BoardChatMessage[]>(
+    [...initialData.boardChatMessages].sort(compareBoardChatMessage),
+  );
+  const [boardChatCollapsed, setBoardChatCollapsed] = useState(false);
+  const [boardChatMobileOpen, setBoardChatMobileOpen] = useState(false);
+  const [boardChatSending, setBoardChatSending] = useState(false);
+  const [boardChatLoadingMore, setBoardChatLoadingMore] = useState(false);
+  const [boardChatHasMore, setBoardChatHasMore] = useState(
+    initialData.boardChatMessages.length >= BOARD_CHAT_PAGE_SIZE,
+  );
+  const [boardChatNextBefore, setBoardChatNextBefore] = useState<string | null>(
+    initialData.boardChatMessages[0]?.created_at ?? null,
+  );
+  const [boardChatError, setBoardChatError] = useState<string | null>(null);
+  const [boardChatDeletingIds, setBoardChatDeletingIds] = useState<string[]>([]);
   const [cardDetailLoadingById, setCardDetailLoadingById] = useState<Record<string, boolean>>({});
   const loadedCardDetailRef = useRef(new Set<string>());
   const checklistsRef = useRef<Checklist[]>([]);
@@ -681,16 +832,27 @@ export function BoardClient({
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [showListComposer, setShowListComposer] = useState(false);
   const [showViewPicker, setShowViewPicker] = useState(false);
+  const [showHeaderTaskAdd, setShowHeaderTaskAdd] = useState(false);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
 
   const [keywordQuery, setKeywordQuery] = useState("");
   const [memberFilters, setMemberFilters] = useState<MemberFilters>(DEFAULT_MEMBER_FILTERS);
   const [statusFilters, setStatusFilters] = useState<StatusFilters>(DEFAULT_STATUS_FILTERS);
+  const [listFilters, setListFilters] = useState<ListFilters>(DEFAULT_LIST_FILTERS);
   const [dueFilters, setDueFilters] = useState<DueBucket[]>([]);
   const [labelFilters, setLabelFilters] = useState<LabelFilters>(DEFAULT_LABEL_FILTERS);
 
   const [newListName, setNewListName] = useState("");
   const [cardDrafts, setCardDrafts] = useState<Record<string, string>>({});
+  const [headerTaskTitle, setHeaderTaskTitle] = useState("");
+  const [headerTaskListId, setHeaderTaskListId] = useState<string | null>(() => {
+    const firstList = [...initialData.lists]
+      .filter((list) => !list.is_archived)
+      .sort((a, b) => a.position - b.position)[0];
+    return firstList?.id ?? null;
+  });
+  const [headerTaskSubmitting, setHeaderTaskSubmitting] = useState(false);
+  const [headerTaskError, setHeaderTaskError] = useState<string | null>(null);
   const [tableSavingByCardId, setTableSavingByCardId] = useState<Record<string, boolean>>({});
   const tableSavingByCardIdRef = useRef<Record<string, boolean>>({});
   const [activeDragCardId, setActiveDragCardId] = useState<string | null>(null);
@@ -700,11 +862,13 @@ export function BoardClient({
 
   const canManageBoardUi = canManageBoard(initialData.currentUser.role);
   const currentUserId = initialData.currentUser.id;
+  const boardCode = initialData.board.board_code;
 
   const sortedLists = useMemo(
     () => [...lists].filter((list) => !list.is_archived).sort((a, b) => a.position - b.position),
     [lists],
   );
+  const headerTaskAddDisabled = sortedLists.length === 0;
   const sortableListColumnIds = useMemo(
     () => sortedLists.map((list) => getListColumnDndId(list.id)),
     [sortedLists],
@@ -723,12 +887,30 @@ export function BoardClient({
   }, [selectedCardId]);
 
   useEffect(() => {
+    if (!selectedCardId) return;
+    setBoardChatMobileOpen(false);
+  }, [selectedCardId]);
+
+  useEffect(() => {
     tableSavingByCardIdRef.current = tableSavingByCardId;
   }, [tableSavingByCardId]);
 
   useEffect(() => {
     checklistsRef.current = checklists;
   }, [checklists]);
+
+  useEffect(() => {
+    if (!sortedLists.length) {
+      setHeaderTaskListId(null);
+      setShowHeaderTaskAdd(false);
+      setHeaderTaskTitle("");
+      setHeaderTaskError(null);
+      return;
+    }
+    if (!headerTaskListId || !sortedLists.some((list) => list.id === headerTaskListId)) {
+      setHeaderTaskListId(sortedLists[0].id);
+    }
+  }, [headerTaskListId, sortedLists]);
 
   const selectedCardWatcherIds = useMemo(() => {
     if (!selectedCardId) return [];
@@ -765,14 +947,20 @@ export function BoardClient({
     const normalizedKeyword = keywordQuery.trim().toLowerCase();
     const hasMemberFilters =
       memberFilters.unassigned || memberFilters.assignedToMe || memberFilters.memberIds.length > 0;
-    const hasStatusFilters = statusFilters.completed || statusFilters.dueIncomplete;
+    const hasStatusFilters = statusFilters.completed || statusFilters.nonCompleted;
+    const hasListFilters = listFilters.listIds.length > 0;
     const hasDueFilters = dueFilters.length > 0;
     const hasLabelFilters = labelFilters.noLabel || labelFilters.labelIds.length > 0;
 
     return cards.filter((card) => {
       if (card.archived) return false;
 
-      if (normalizedKeyword && !`${card.title} ${card.description ?? ""}`.toLowerCase().includes(normalizedKeyword)) {
+      if (
+        normalizedKeyword &&
+        !`${card.title} ${card.description ?? ""} ${formatTaskDisplayId(boardCode, card.task_number)}`
+          .toLowerCase()
+          .includes(normalizedKeyword)
+      ) {
         return false;
       }
 
@@ -788,11 +976,12 @@ export function BoardClient({
         if (!matchesMembers) return false;
       }
 
-      if (hasStatusFilters) {
-        const matchesStatus =
-          (statusFilters.completed && card.is_completed) ||
-          (statusFilters.dueIncomplete && Boolean(card.due_at) && !card.is_completed);
-        if (!matchesStatus) return false;
+      if (hasStatusFilters && !matchesCardStatusFilters(card.is_completed, statusFilters)) {
+        return false;
+      }
+
+      if (hasListFilters && !matchesCardListFilters(card.list_id, listFilters)) {
+        return false;
       }
 
       if (hasDueFilters && !dueFilters.some((bucket) => matchesDueBucket(card.due_at, bucket))) {
@@ -813,16 +1002,18 @@ export function BoardClient({
     assigneeIdsByCard,
     cards,
     currentUserId,
+    boardCode,
     dueFilters,
     keywordQuery,
     labelFilters.labelIds,
     labelFilters.noLabel,
     labelIdsByCard,
+    listFilters.listIds,
     memberFilters.assignedToMe,
     memberFilters.memberIds,
     memberFilters.unassigned,
     statusFilters.completed,
-    statusFilters.dueIncomplete,
+    statusFilters.nonCompleted,
   ]);
 
   const cardsByList = useMemo(() => {
@@ -898,6 +1089,20 @@ export function BoardClient({
     return map;
   }, [cardCustomFieldValues]);
 
+  const customFieldById = useMemo(
+    () => new Map(sortedCustomFields.map((field) => [field.id, field])),
+    [sortedCustomFields],
+  );
+
+  const searchParamsString = searchParams.toString();
+  const tableSortState = useMemo<TableSortState>(() => {
+    const params = new URLSearchParams(searchParamsString);
+    return parseTableSortState(
+      params,
+      sortedCustomFields.map((field) => field.id),
+    );
+  }, [searchParamsString, sortedCustomFields]);
+
   const tableCustomFieldColumns = useMemo(
     () => sortedCustomFields.map((field) => ({ id: field.id, name: field.name })),
     [sortedCustomFields],
@@ -926,45 +1131,125 @@ export function BoardClient({
     [initialData.members, memberNameById],
   );
 
-  const tableRows = useMemo(() => {
-    return [...filteredCards]
-      .sort((a, b) => a.position - b.position)
-      .map((card) => {
-        const meta = cardMetaById.get(card.id);
+  const baseTableCards = useMemo(
+    () => [...filteredCards].sort((a, b) => a.position - b.position),
+    [filteredCards],
+  );
+
+  const sortedTableCards = useMemo(() => {
+    if (!tableSortState) {
+      return baseTableCards;
+    }
+    const activeSortState: Exclude<TableSortState, null> = tableSortState;
+
+    const baseOrderByCardId = new Map(baseTableCards.map((card, index) => [card.id, index]));
+    const customFieldId = activeSortState.key.startsWith("custom:")
+      ? activeSortState.key.slice("custom:".length)
+      : null;
+    const customField = customFieldId ? customFieldById.get(customFieldId) : undefined;
+
+    function resolveSortValue(card: BoardCard): string | number | boolean | null {
+      if (activeSortState.key === "taskId") {
+        return card.task_number;
+      }
+
+      if (activeSortState.key === "title") {
+        return card.title.trim();
+      }
+
+      if (activeSortState.key === "list") {
+        return listNameById.get(card.list_id) ?? null;
+      }
+
+      if (activeSortState.key === "labels") {
         const labelIds = labelIdsByCard.get(card.id) ?? [];
+        const names = labelIds.map((id) => labelNameById.get(id) ?? id).filter((value) => value.length > 0);
+        return normalizeSortableNameList(names);
+      }
+
+      if (activeSortState.key === "assignees") {
         const assigneeIds = assigneeIdsByCard.get(card.id) ?? [];
-        return {
-          id: card.id,
-          title: card.title,
-          listId: card.list_id,
-          listName: listNameById.get(card.list_id) ?? BOARD_COMMON_LABELS.unknown,
-          labelIds,
-          assigneeIds,
-          assigneePrimary: meta?.assigneePrimary ?? null,
-          assigneeExtraCount: meta?.assigneeExtraCount ?? 0,
-          labels: labelIds.map((id) => labelNameById.get(id) ?? id),
-          customFieldValues: Object.fromEntries(
-            sortedCustomFields.map((field) => {
-              const value = customFieldValueByCardAndField.get(`${card.id}:${field.id}`);
-              return [field.id, formatCustomFieldValue(field, value)];
-            }),
-          ) as Record<string, string>,
-          dueAt: card.due_at,
-          dueDateValue: toDateInputValue(card.due_at),
-          dueLabel: meta?.dueLabel ?? null,
-          deadlineState: meta?.deadlineState ?? resolveCardDeadlineState(card.due_at, card.is_completed),
-          isCompleted: card.is_completed,
-        };
-      });
+        const names = assigneeIds.map((id) => memberNameById.get(id) ?? id).filter((value) => value.length > 0);
+        return normalizeSortableNameList(names);
+      }
+
+      if (activeSortState.key === "dueAt") {
+        return toSortableTimestamp(card.due_at);
+      }
+
+      if (activeSortState.key === "status") {
+        return card.is_completed;
+      }
+
+      if (!customFieldId) {
+        return null;
+      }
+
+      const customFieldValue = customFieldValueByCardAndField.get(`${card.id}:${customFieldId}`);
+      return resolveCustomFieldSortValue(customField, customFieldValue);
+    }
+
+    return [...baseTableCards].sort((left, right) => {
+      const compared = compareTableSortValues(
+        resolveSortValue(left),
+        resolveSortValue(right),
+        activeSortState.direction,
+      );
+      if (compared !== 0) return compared;
+
+      return (baseOrderByCardId.get(left.id) ?? 0) - (baseOrderByCardId.get(right.id) ?? 0);
+    });
   }, [
-    filteredCards,
-    cardMetaById,
-    labelIdsByCard,
     assigneeIdsByCard,
-    listNameById,
-    labelNameById,
-    sortedCustomFields,
+    baseTableCards,
+    customFieldById,
     customFieldValueByCardAndField,
+    labelIdsByCard,
+    labelNameById,
+    listNameById,
+    memberNameById,
+    tableSortState,
+  ]);
+
+  const tableRows = useMemo(() => {
+    return sortedTableCards.map((card) => {
+      const meta = cardMetaById.get(card.id);
+      const labelIds = labelIdsByCard.get(card.id) ?? [];
+      const assigneeIds = assigneeIdsByCard.get(card.id) ?? [];
+      return {
+        id: card.id,
+        taskId: formatTaskDisplayId(boardCode, card.task_number),
+        title: card.title,
+        listId: card.list_id,
+        listName: listNameById.get(card.list_id) ?? BOARD_COMMON_LABELS.unknown,
+        labelIds,
+        assigneeIds,
+        assigneePrimary: meta?.assigneePrimary ?? null,
+        assigneeExtraCount: meta?.assigneeExtraCount ?? 0,
+        labels: labelIds.map((id) => labelNameById.get(id) ?? id),
+        customFieldValues: Object.fromEntries(
+          sortedCustomFields.map((field) => {
+            const value = customFieldValueByCardAndField.get(`${card.id}:${field.id}`);
+            return [field.id, formatCustomFieldValue(field, value)];
+          }),
+        ) as Record<string, string>,
+        dueAt: card.due_at,
+        dueDateValue: toDateInputValue(card.due_at),
+        dueLabel: meta?.dueLabel ?? null,
+        deadlineState: meta?.deadlineState ?? resolveCardDeadlineState(card.due_at, card.is_completed),
+        isCompleted: card.is_completed,
+      };
+    });
+  }, [
+    assigneeIdsByCard,
+    boardCode,
+    cardMetaById,
+    customFieldValueByCardAndField,
+    labelIdsByCard,
+    labelNameById,
+    listNameById,
+    sortedCustomFields,
+    sortedTableCards,
   ]);
 
   function getNextListPosition() {
@@ -1127,6 +1412,33 @@ export function BoardClient({
           const normalized = nextList as BoardList;
           setLists((current) => upsertRealtimeList(current, normalized));
         },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "board_chat_messages",
+          filter: `board_id=eq.${boardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedMessage = payload.old as Partial<BoardChatMessage>;
+            if (!removedMessage.id) return;
+            setBoardChatMessages((current) => current.filter((message) => message.id !== removedMessage.id));
+            setBoardChatDeletingIds((current) => current.filter((id) => id !== removedMessage.id));
+            return;
+          }
+
+          const nextMessage = payload.new as Partial<BoardChatMessage>;
+          if (!nextMessage.id || !nextMessage.created_at || !nextMessage.content || !nextMessage.user_id || !nextMessage.board_id) {
+            return;
+          }
+
+          setBoardChatMessages((current) =>
+            upsertBoardChatMessage(current, nextMessage as BoardChatMessage),
+          );
+        },
       );
 
     channel.subscribe();
@@ -1173,6 +1485,95 @@ export function BoardClient({
     void fetchCardDetail(selectedCardId, { force: true });
   }
 
+  async function sendBoardChatMessage(content: string) {
+    const trimmed = content.trim();
+    if (!trimmed || boardChatSending) return;
+
+    setBoardChatSending(true);
+    setBoardChatError(null);
+    try {
+      const response = await fetch(`/api/boards/${initialData.board.id}/chat-messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: trimmed }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body?.data) {
+        throw new Error(body?.error?.message ?? "チャットの送信に失敗しました。");
+      }
+
+      setBoardChatMessages((current) => upsertBoardChatMessage(current, body.data as BoardChatMessage));
+    } catch (chatSendError) {
+      const message = chatSendError instanceof Error ? chatSendError.message : "チャットの送信に失敗しました。";
+      setBoardChatError(message);
+      throw chatSendError;
+    } finally {
+      setBoardChatSending(false);
+    }
+  }
+
+  async function deleteBoardChatMessage(messageId: string) {
+    if (boardChatDeletingIds.includes(messageId)) return;
+
+    setBoardChatDeletingIds((current) => (current.includes(messageId) ? current : [...current, messageId]));
+    setBoardChatError(null);
+    try {
+      const response = await fetch(`/api/boards/${initialData.board.id}/chat-messages/${messageId}`, {
+        method: "DELETE",
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body?.data?.deleted) {
+        throw new Error(body?.error?.message ?? "チャットメッセージの削除に失敗しました。");
+      }
+
+      setBoardChatMessages((current) => current.filter((message) => message.id !== messageId));
+    } catch (chatDeleteError) {
+      const message =
+        chatDeleteError instanceof Error ? chatDeleteError.message : "チャットメッセージの削除に失敗しました。";
+      setBoardChatError(message);
+      throw chatDeleteError;
+    } finally {
+      setBoardChatDeletingIds((current) => current.filter((id) => id !== messageId));
+    }
+  }
+
+  async function loadOlderBoardChatMessages() {
+    if (!boardChatHasMore || boardChatLoadingMore || !boardChatNextBefore) return;
+
+    setBoardChatLoadingMore(true);
+    setBoardChatError(null);
+    try {
+      const query = `before=${encodeURIComponent(boardChatNextBefore)}`;
+      const response = await fetch(`/api/boards/${initialData.board.id}/chat-messages?${query}`);
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body?.data) {
+        throw new Error(body?.error?.message ?? "過去メッセージの取得に失敗しました。");
+      }
+
+      const data = body.data as Partial<BoardChatPageData>;
+      const incomingMessages = Array.isArray(data.messages)
+        ? (data.messages as BoardChatMessage[])
+        : [];
+
+      setBoardChatMessages((current) =>
+        incomingMessages.reduce((acc, message) => upsertBoardChatMessage(acc, message), current),
+      );
+      setBoardChatHasMore(Boolean(data.hasMore));
+      setBoardChatNextBefore(
+        typeof data.nextBefore === "string"
+          ? data.nextBefore
+          : data.hasMore
+            ? (incomingMessages[0]?.created_at ?? boardChatNextBefore)
+            : null,
+      );
+    } catch (chatLoadError) {
+      const message = chatLoadError instanceof Error ? chatLoadError.message : "過去メッセージの取得に失敗しました。";
+      setBoardChatError(message);
+    } finally {
+      setBoardChatLoadingMore(false);
+    }
+  }
+
   async function persistPreferences(patch: {
     selectedView?: ViewMode;
     leftRailCollapsed?: boolean;
@@ -1208,6 +1609,32 @@ export function BoardClient({
 
   async function createUnscheduledCard(listId: string, title: string) {
     await createCard(listId, title);
+  }
+
+  async function submitHeaderTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (headerTaskSubmitting) return;
+
+    const title = headerTaskTitle.trim();
+    if (!title) return;
+    if (!headerTaskListId) {
+      setHeaderTaskError("先にリストを追加してください。");
+      return;
+    }
+
+    setHeaderTaskSubmitting(true);
+    setHeaderTaskError(null);
+    try {
+      await createCard(headerTaskListId, title);
+      setHeaderTaskTitle("");
+      setShowHeaderTaskAdd(false);
+    } catch (headerCreateError) {
+      setHeaderTaskError(
+        headerCreateError instanceof Error ? headerCreateError.message : BOARD_ERROR_MESSAGES.createCard,
+      );
+    } finally {
+      setHeaderTaskSubmitting(false);
+    }
   }
 
   async function placeUnscheduledCard(cardId: string, listId: string, dayKey: string) {
@@ -1421,6 +1848,17 @@ export function BoardClient({
       },
       fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
     });
+  }
+
+  function handleTableSort(sortKey: TableSortKey) {
+    const nextSortState = getNextTableSortState(tableSortState, sortKey);
+    const nextParams = applyTableSortStateToSearchParams(
+      new URLSearchParams(searchParamsString),
+      nextSortState,
+    );
+    const nextQuery = nextParams.toString();
+    const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+    router.replace(nextUrl, { scroll: false });
   }
 
   async function archiveList(list: BoardList) {
@@ -1889,6 +2327,7 @@ export function BoardClient({
     setKeywordQuery("");
     setMemberFilters(DEFAULT_MEMBER_FILTERS);
     setStatusFilters(DEFAULT_STATUS_FILTERS);
+    setListFilters(DEFAULT_LIST_FILTERS);
     setDueFilters([]);
     setLabelFilters(DEFAULT_LABEL_FILTERS);
   }
@@ -1906,6 +2345,15 @@ export function BoardClient({
     setDueFilters((current) => (
       current.includes(bucket) ? current.filter((value) => value !== bucket) : [...current, bucket]
     ));
+  }
+
+  function toggleListIdFilter(listId: string) {
+    setListFilters((current) => ({
+      ...current,
+      listIds: current.listIds.includes(listId)
+        ? current.listIds.filter((id) => id !== listId)
+        : [...current.listIds, listId],
+    }));
   }
 
   function toggleLabelIdFilter(labelId: string) {
@@ -1934,20 +2382,32 @@ export function BoardClient({
       memberFilters.assignedToMe ||
       memberFilters.memberIds.length ||
       statusFilters.completed ||
-      statusFilters.dueIncomplete ||
+      statusFilters.nonCompleted ||
+      listFilters.listIds.length ||
       dueFilters.length ||
       labelFilters.noLabel ||
       labelFilters.labelIds.length,
   );
   const filtersVisible = showFilterPanel;
   const CurrentViewIcon = VIEW_MENU_ITEMS.find((item) => item.mode === viewMode)?.icon ?? Kanban;
+  const boardDescriptionText = initialData.board.description?.trim() ?? "";
+  const showBoardDescription = boardDescriptionText.length > 0 && boardDescriptionText !== "初期テンプレート";
 
   useEffect(() => {
-    if (!showViewPicker && !showFilterPanel) return;
+    if (!showViewPicker && !showHeaderTaskAdd && !showFilterPanel && !boardChatMobileOpen) return;
 
     function handlePointerDown(event: MouseEvent) {
       if (showViewPicker && !viewPickerRef.current?.contains(event.target as Node)) {
         setShowViewPicker(false);
+      }
+      if (
+        showHeaderTaskAdd &&
+        !headerTaskSubmitting &&
+        !headerTaskAddRef.current?.contains(event.target as Node)
+      ) {
+        setShowHeaderTaskAdd(false);
+        setHeaderTaskTitle("");
+        setHeaderTaskError(null);
       }
     }
 
@@ -1956,8 +2416,16 @@ export function BoardClient({
       if (showViewPicker) {
         setShowViewPicker(false);
       }
+      if (showHeaderTaskAdd && !headerTaskSubmitting) {
+        setShowHeaderTaskAdd(false);
+        setHeaderTaskTitle("");
+        setHeaderTaskError(null);
+      }
       if (showFilterPanel) {
         setShowFilterPanel(false);
+      }
+      if (boardChatMobileOpen) {
+        setBoardChatMobileOpen(false);
       }
     }
 
@@ -1967,7 +2435,7 @@ export function BoardClient({
       document.removeEventListener("mousedown", handlePointerDown);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, [showFilterPanel, showViewPicker]);
+  }, [boardChatMobileOpen, headerTaskSubmitting, showFilterPanel, showHeaderTaskAdd, showViewPicker]);
 
   return (
     <main className="tm-root" style={boardBackground}>
@@ -2006,55 +2474,72 @@ export function BoardClient({
           </div>
 
           {!leftRailCollapsed ? (
-            <>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{BOARD_COMMON_LABELS.boards}</p>
-                <div className="mt-2 space-y-1">
-                  {workspaceBoards.map((board) => {
-                    const isCurrentBoard = board.id === initialData.board.id;
-                    if (isCurrentBoard && canManageBoardUi) {
+            <div className="tm-left-rail-content">
+              <div className="tm-left-rail-top">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{BOARD_COMMON_LABELS.boards}</p>
+                  <div className="mt-2 space-y-1">
+                    {workspaceBoards.map((board) => {
+                      const isCurrentBoard = board.id === initialData.board.id;
+                      if (isCurrentBoard && canManageBoardUi) {
+                        return (
+                          <div key={board.id} className="rounded-md bg-blue-100 px-2 py-1.5 text-sm text-blue-700">
+                            {isEditingBoardName ? (
+                              <p className="w-full truncate font-semibold">{boardNameDraft}</p>
+                            ) : (
+                              <button
+                                className="w-full truncate text-left font-semibold"
+                                type="button"
+                                onClick={startBoardNameEdit}
+                                onKeyDown={handleBoardNameButtonKeyDown}
+                              >
+                                {board.name}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      }
+
                       return (
-                        <div key={board.id} className="rounded-md bg-blue-100 px-2 py-1.5 text-sm text-blue-700">
-                          {isEditingBoardName ? (
-                            <p className="w-full truncate font-semibold">{boardNameDraft}</p>
-                          ) : (
-                            <button
-                              className="w-full truncate text-left font-semibold"
-                              type="button"
-                              onClick={startBoardNameEdit}
-                              onKeyDown={handleBoardNameButtonKeyDown}
-                            >
-                              {board.name}
-                            </button>
-                          )}
-                        </div>
+                        <Link
+                          key={board.id}
+                          className={`block rounded-md px-2 py-1.5 text-sm ${
+                            isCurrentBoard ? "bg-blue-100 text-blue-700" : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                          href={`/b/${board.slug}`}
+                          prefetch={false}
+                        >
+                          {board.name}
+                        </Link>
                       );
-                    }
-
-                    return (
-                      <Link
-                        key={board.id}
-                        className={`block rounded-md px-2 py-1.5 text-sm ${
-                          isCurrentBoard ? "bg-blue-100 text-blue-700" : "text-slate-600 hover:bg-slate-100"
-                        }`}
-                        href={`/b/${board.slug}`}
-                        prefetch={false}
-                      >
-                        {board.name}
-                      </Link>
-                    );
-                  })}
+                    })}
+                  </div>
+                  <button
+                    className="mt-3 block w-full rounded-md border border-slate-300 bg-slate-100 px-2 py-1.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-200"
+                    type="button"
+                    onClick={() => setShowCreateBoardModal(true)}
+                  >
+                    + ボードを追加
+                  </button>
                 </div>
-                <button
-                  className="mt-3 block w-full rounded-md border border-slate-300 bg-slate-100 px-2 py-1.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-200"
-                  type="button"
-                  onClick={() => setShowCreateBoardModal(true)}
-                >
-                  + ボードを追加
-                </button>
               </div>
-
-            </>
+              <BoardChatPanel
+                members={initialData.members}
+                messages={boardChatMessages}
+                currentUserId={currentUserId}
+                collapsed={boardChatCollapsed}
+                sending={boardChatSending}
+                loadingMore={boardChatLoadingMore}
+                hasMore={boardChatHasMore}
+                deletingMessageIds={boardChatDeletingIds}
+                error={boardChatError}
+                onToggleCollapsed={() => setBoardChatCollapsed((current) => !current)}
+                onSend={sendBoardChatMessage}
+                onDeleteMessage={deleteBoardChatMessage}
+                onLoadMore={loadOlderBoardChatMessages}
+                onClearError={() => setBoardChatError(null)}
+              />
+            </div>
           ) : null}
         </aside>
 
@@ -2091,7 +2576,17 @@ export function BoardClient({
                     className="tm-view-picker-trigger"
                     type="button"
                     aria-label="\u30d3\u30e5\u30fc\u3092\u9078\u629e"
-                    onClick={() => setShowViewPicker((value) => !value)}
+                    onClick={() =>
+                      setShowViewPicker((value) => {
+                        const next = !value;
+                        if (next) {
+                          setShowHeaderTaskAdd(false);
+                          setHeaderTaskTitle("");
+                          setHeaderTaskError(null);
+                        }
+                        return next;
+                      })
+                    }
                   >
                     <CurrentViewIcon className="h-4 w-4" />
                     <ChevronDown className="h-4 w-4" />
@@ -2130,8 +2625,94 @@ export function BoardClient({
                     </div>
                   ) : null}
                 </div>
+                <div className="tm-header-task-add" ref={headerTaskAddRef}>
+                  <button
+                    className="tm-header-task-add-trigger"
+                    type="button"
+                    aria-label={headerTaskAddDisabled ? "先にリストを追加してください" : "タスクを追加"}
+                    title={headerTaskAddDisabled ? "先にリストを追加してください" : "タスクを追加"}
+                    disabled={headerTaskAddDisabled || headerTaskSubmitting}
+                    onClick={() =>
+                      setShowHeaderTaskAdd((current) => {
+                        const next = !current;
+                        if (next) {
+                          setShowViewPicker(false);
+                          setHeaderTaskError(null);
+                        } else {
+                          setHeaderTaskTitle("");
+                          setHeaderTaskError(null);
+                        }
+                        return next;
+                      })
+                    }
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                  {showHeaderTaskAdd ? (
+                    <form className="tm-header-task-add-pop" role="dialog" aria-label="タスクを追加" onSubmit={submitHeaderTask}>
+                      <div className="tm-header-task-add-head">
+                        <p>タスクを追加</p>
+                        <button
+                          className="tm-header-task-add-close"
+                          type="button"
+                          aria-label="閉じる"
+                          disabled={headerTaskSubmitting}
+                          onClick={() => {
+                            setShowHeaderTaskAdd(false);
+                            setHeaderTaskTitle("");
+                            setHeaderTaskError(null);
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <input
+                        className="tm-header-task-add-input"
+                        value={headerTaskTitle}
+                        onChange={(event) => setHeaderTaskTitle(event.target.value)}
+                        placeholder="タスク名を入力"
+                        autoFocus
+                        disabled={headerTaskSubmitting}
+                      />
+                      <select
+                        className="tm-header-task-add-select"
+                        value={headerTaskListId ?? ""}
+                        onChange={(event) => setHeaderTaskListId(event.target.value)}
+                        disabled={headerTaskSubmitting || headerTaskAddDisabled}
+                      >
+                        {sortedLists.map((list) => (
+                          <option key={list.id} value={list.id}>
+                            {list.name}
+                          </option>
+                        ))}
+                      </select>
+                      {headerTaskError ? <p className="tm-header-task-add-error">{headerTaskError}</p> : null}
+                      <div className="tm-header-task-add-actions">
+                        <button
+                          className="tm-button tm-button-primary"
+                          type="submit"
+                          disabled={headerTaskSubmitting || !headerTaskTitle.trim() || !headerTaskListId}
+                        >
+                          {headerTaskSubmitting ? "追加中..." : "追加"}
+                        </button>
+                        <button
+                          className="tm-button tm-button-secondary"
+                          type="button"
+                          disabled={headerTaskSubmitting}
+                          onClick={() => {
+                            setShowHeaderTaskAdd(false);
+                            setHeaderTaskTitle("");
+                            setHeaderTaskError(null);
+                          }}
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </form>
+                  ) : null}
+                </div>
               </div>
-              <p className="text-sm text-slate-700">{initialData.board.description ?? BOARD_COMMON_LABELS.noDescription}</p>
+              {showBoardDescription ? <p className="text-sm text-slate-700">{boardDescriptionText}</p> : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -2231,19 +2812,19 @@ export function BoardClient({
                       }
                     />
                     <span className="tm-filter-icon-circle tm-filter-icon-circle-success">完</span>
-                    <span className="tm-filter-check-text">完了済みにしました</span>
+                    <span className="tm-filter-check-text">完了済み</span>
                   </label>
                   <label className="tm-filter-check-row">
                     <input
                       className="tm-filter-checkbox"
                       type="checkbox"
-                      checked={statusFilters.dueIncomplete}
+                      checked={statusFilters.nonCompleted}
                       onChange={(event) =>
-                        setStatusFilters((current) => ({ ...current, dueIncomplete: event.target.checked }))
+                        setStatusFilters((current) => ({ ...current, nonCompleted: event.target.checked }))
                       }
                     />
-                    <span className="tm-filter-icon-circle tm-filter-icon-circle-warning">期</span>
-                    <span className="tm-filter-check-text">期限あり・未完了</span>
+                    <span className="tm-filter-icon-circle tm-filter-icon-circle-warning">未</span>
+                    <span className="tm-filter-check-text">完了以外</span>
                   </label>
                 </section>
 
@@ -2259,6 +2840,22 @@ export function BoardClient({
                       />
                       <span className={`tm-filter-icon-circle tm-filter-icon-circle-${option.tone}`}>期</span>
                       <span className="tm-filter-check-text">{option.label}</span>
+                    </label>
+                  ))}
+                </section>
+
+                <section className="tm-filter-section">
+                  <p className="tm-filter-section-heading">リスト</p>
+                  {sortedLists.map((list) => (
+                    <label key={list.id} className="tm-filter-check-row">
+                      <input
+                        className="tm-filter-checkbox"
+                        type="checkbox"
+                        checked={listFilters.listIds.includes(list.id)}
+                        onChange={() => toggleListIdFilter(list.id)}
+                      />
+                      <span className="tm-filter-icon-circle tm-filter-icon-circle-neutral">列</span>
+                      <span className="tm-filter-check-text">{list.name}</span>
                     </label>
                   ))}
                 </section>
@@ -2320,7 +2917,7 @@ export function BoardClient({
             ) : null}
 
             {viewMode === "table" ? (
-              <section className="tm-view-card">
+              <section className="tm-view-card tm-view-card-table">
                 <TableView
                   rows={tableRows}
                   customFieldColumns={tableCustomFieldColumns}
@@ -2328,6 +2925,8 @@ export function BoardClient({
                   labels={tableLabels}
                   members={tableMembers}
                   savingByCardId={tableSavingByCardId}
+                  sortState={tableSortState}
+                  onSort={handleTableSort}
                   onSelectCard={openCard}
                   onListChange={handleTableListChange}
                   onLabelsChange={handleTableLabelsChange}
@@ -2354,12 +2953,13 @@ export function BoardClient({
             {viewMode === "board" ? (
               <section className="tm-board-lists-wrap">
                 <SortableContext items={sortableListColumnIds} strategy={horizontalListSortingStrategy}>
-                  <div className="tm-board-lists">
+                  <div className="tm-board-lists tm-board-lists-app">
                     {sortedLists.map((list) => (
                       <Column
                         key={list.id}
                         list={list}
                         cards={cardsByList.get(list.id) ?? []}
+                        boardCode={boardCode}
                         cardMetaById={cardMetaById}
                         onOpen={openCard}
                         canArchive={canManageBoardUi}
@@ -2425,7 +3025,7 @@ export function BoardClient({
             <DragOverlay zIndex={120}>
               {activeDragCard ? (
                 <article className="tm-card tm-card-overlay tm-card-draggable" aria-hidden="true">
-                  <CardPresentation card={activeDragCard} meta={cardMetaById.get(activeDragCard.id)} />
+                  <CardPresentation card={activeDragCard} boardCode={boardCode} meta={cardMetaById.get(activeDragCard.id)} />
                 </article>
               ) : null}
             </DragOverlay>
@@ -2433,6 +3033,42 @@ export function BoardClient({
 
         </section>
       </div>
+
+      {!selectedCard && !boardChatMobileOpen ? (
+        <button
+          type="button"
+          className="tm-board-chat-mobile-fab"
+          aria-label="ボード内チャットを開く"
+          onClick={() => setBoardChatMobileOpen(true)}
+        >
+          <MessageSquare className="h-5 w-5" />
+        </button>
+      ) : null}
+
+      {!selectedCard && boardChatMobileOpen ? (
+        <>
+          <div className="tm-board-chat-mobile-overlay" onClick={() => setBoardChatMobileOpen(false)} />
+          <div className="tm-board-chat-mobile-sheet" role="dialog" aria-label="ボード内チャット">
+            <BoardChatPanel
+              className="tm-board-chat-mobile-panel"
+              members={initialData.members}
+              messages={boardChatMessages}
+              currentUserId={currentUserId}
+              collapsed={false}
+              sending={boardChatSending}
+              loadingMore={boardChatLoadingMore}
+              hasMore={boardChatHasMore}
+              deletingMessageIds={boardChatDeletingIds}
+              error={boardChatError}
+              onToggleCollapsed={() => setBoardChatMobileOpen(false)}
+              onSend={sendBoardChatMessage}
+              onDeleteMessage={deleteBoardChatMessage}
+              onLoadMore={loadOlderBoardChatMessages}
+              onClearError={() => setBoardChatError(null)}
+            />
+          </div>
+        </>
+      ) : null}
 
       {selectedCard ? (
         <div className="fixed right-20 top-5 z-[70] flex items-center gap-2">
@@ -2459,6 +3095,7 @@ export function BoardClient({
           key={selectedCard.id}
           workspaceId={initialData.workspace.id}
           boardId={initialData.board.id}
+          boardCode={boardCode}
           card={selectedCard}
           lists={sortedLists}
           members={initialData.members}

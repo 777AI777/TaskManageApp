@@ -306,9 +306,6 @@ export function CalendarView({ cards, cardMetaById, onSelectCard }: Props) {
             <option value="week">{"\u9031"}</option>
           </select>
         </div>
-        <button className="tm-toolbar-sync" type="button">
-          {"\u500b\u4eba\u30ab\u30ec\u30f3\u30c0\u30fc\u3068\u540c\u671f"}
-        </button>
       </header>
 
       <div className={`tm-calendar-grid ${mode === "week" ? "tm-calendar-week" : ""}`}>

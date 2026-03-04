@@ -5,11 +5,13 @@ import { Tag, Clock, CheckSquare, User, Paperclip, LayoutGrid, AlignLeft, Eye, A
 import type { Attachment, BoardCard, BoardList, BoardMember, CardAssignee, CardComment, CardCustomFieldValue, CardLabel, Checklist, ChecklistItem, CustomField, Label } from "@/components/board/board-types";
 import { resolveAvatarColor } from "@/lib/avatar-color";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { formatTaskDisplayId } from "@/lib/task-id";
 type ActivePanel = "addMenu" | "labels" | "dates" | "checklist" | "members" | "attachment" | "customFields" | null;
 type LabelPanelMode = "list" | "create";
 type Props = {
   workspaceId: string;
   boardId: string;
+  boardCode: string;
   card: BoardCard;
   lists: BoardList[];
   members: BoardMember[];
@@ -132,15 +134,18 @@ const EMPTY_CHECKLIST_ITEM_DRAFT: ChecklistItemDraft = {
   assigneeId: null,
   dueDate: "",
 };
-function toDateTimeInputValue(value: string | null): string {
-  return value ? new Date(value).toISOString().slice(0, 16) : "";
-}
 function toDateInputValue(value: string | null): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return localDate.toISOString().slice(0, 10);
+}
+function toStartAtIsoFromDate(value: string): string | null {
+  if (!value) return null;
+  const startAt = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(startAt.getTime())) return null;
+  return startAt.toISOString();
 }
 function toDueAtIsoFromDate(value: string): string | null {
   if (!value) return null;
@@ -188,6 +193,7 @@ function buildCustomFieldDrafts(customFields: CustomField[], cardCustomFieldValu
 export function CardDetailDrawer({
   workspaceId,
   boardId,
+  boardCode,
   card,
   lists,
   members,
@@ -222,8 +228,8 @@ export function CardDetailDrawer({
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description ?? "");
   const [listId, setListId] = useState(card.list_id);
-  const [startAt, setStartAt] = useState(toDateTimeInputValue(card.start_at));
-  const [dueAt, setDueAt] = useState(toDateTimeInputValue(card.due_at));
+  const [startAt, setStartAt] = useState(toDateInputValue(card.start_at));
+  const [dueAt, setDueAt] = useState(toDateInputValue(card.due_at));
   const [coverColor, setCoverColor] = useState(card.cover_value ?? card.cover_color ?? "#2b6cb0");
   const incomingAssigneeIds = useMemo(() => getAssigneeIdsForCard(cardAssignees, card.id), [cardAssignees, card.id]);
   const incomingLabelIds = useMemo(() => getLabelIdsForCard(cardLabels, card.id), [cardLabels, card.id]);
@@ -277,6 +283,7 @@ export function CardDetailDrawer({
   const cardAttachments = useMemo(() => attachments.filter(a => a.card_id === card.id), [attachments, card.id]);
   const isWatching = currentUserId ? cardWatchers.includes(currentUserId) : false;
   const isPastDue = card.due_at ? new Date(card.due_at) < new Date() : false;
+  const taskDisplayId = formatTaskDisplayId(boardCode, card.task_number);
   const hasCoverBand = card.cover_type === "color" && Boolean(card.cover_value);
   const commentFeed = useMemo(() => {
     const items = [
@@ -327,8 +334,8 @@ export function CardDetailDrawer({
   }, [card.list_id]);
   useEffect(() => {
     if (activePanel === "dates") return;
-    setStartAt(toDateTimeInputValue(card.start_at));
-    setDueAt(toDateTimeInputValue(card.due_at));
+    setStartAt(toDateInputValue(card.start_at));
+    setDueAt(toDateInputValue(card.due_at));
   }, [activePanel, card.start_at, card.due_at]);
   useEffect(() => {
     setCoverColor(card.cover_value ?? card.cover_color ?? "#2b6cb0");
@@ -495,16 +502,28 @@ export function CardDetailDrawer({
     onLabelUpdated?.(updatedLabel);
   }
   async function saveDates() {
+    const nextStartAt = startAt ? toStartAtIsoFromDate(startAt) : null;
+    if (startAt && !nextStartAt) {
+      setError("\u958b\u59cb\u65e5\u306e\u5f62\u5f0f\u304c\u6b63\u3057\u304f\u3042\u308a\u307e\u305b\u3093\u3002");
+      return;
+    }
+
+    const nextDueAt = dueAt ? toDueAtIsoFromDate(dueAt) : null;
+    if (dueAt && !nextDueAt) {
+      setError("\u671f\u9650\u65e5\u306e\u5f62\u5f0f\u304c\u6b63\u3057\u304f\u3042\u308a\u307e\u305b\u3093\u3002");
+      return;
+    }
+
     try {
       const updated = await patchFields({
-        startAt: startAt ? new Date(startAt).toISOString() : null,
-        dueAt: dueAt ? new Date(dueAt).toISOString() : null
+        startAt: nextStartAt,
+        dueAt: nextDueAt
       });
       onCardPatched(updated);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save dates.");
-      setStartAt(toDateTimeInputValue(card.start_at));
-      setDueAt(toDateTimeInputValue(card.due_at));
+      setStartAt(toDateInputValue(card.start_at));
+      setDueAt(toDateInputValue(card.due_at));
     }
   }
 
@@ -979,7 +998,7 @@ export function CardDetailDrawer({
       }} /> : null}        {/* Close button */}        <div className="absolute top-3 right-12 z-20" ref={cardActionsRef}>          <button type="button" aria-label={"カードアクション"} aria-haspopup="menu" aria-expanded={showCardActions} onClick={() => setShowCardActions(prev => !prev)} className="w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none">            {"\u2026"}          </button>          {showCardActions ? <div role="menu" className="absolute right-0 mt-1 w-48 rounded-lg border border-[#d0d4db] bg-white p-1 shadow-xl">              <button type="button" role="menuitem" onClick={() => {
             setShowCardActions(false);
             void toggleArchive();
-          }} className="w-full rounded-md px-3 py-2 text-left text-sm text-[#172b4d] hover:bg-[#f1f2f4]">                {card.archived ? "アーカイブを解除" : "カードをアーカイブ"}              </button>            </div> : null}        </div>        <button type="button" onClick={onClose} aria-label={"\u9589\u3058\u308b"} className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none font-bold">          {"\u00d7"}        </button>        {/* Body: two columns */}        <div className={`flex gap-0 p-5 min-h-[480px] ${hasCoverBand ? "pt-4" : "pt-14"}`}>          {/* ===== MAIN COLUMN ===== */}          <div className="flex-1 min-w-0 pr-6 space-y-5">            {/* Title */}            <div className="flex items-start gap-3">              <div className="mt-3 text-[#44546f] shrink-0"><LayoutGrid className="h-5 w-5" /></div>              <div className="flex-1 min-w-0">                {editingTitle ? <textarea className="w-full text-xl font-bold rounded-lg px-2 py-1.5 resize-none text-[#172b4d] leading-snug border-2 border-[#0c66e4] bg-white focus:outline-none" value={title} rows={2} onChange={e => setTitle(e.target.value)} onBlur={() => {
+          }} className="w-full rounded-md px-3 py-2 text-left text-sm text-[#172b4d] hover:bg-[#f1f2f4]">                {card.archived ? "アーカイブを解除" : "カードをアーカイブ"}              </button>            </div> : null}        </div>        <button type="button" onClick={onClose} aria-label={"\u9589\u3058\u308b"} className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none font-bold">          {"\u00d7"}        </button>        {/* Body: two columns */}        <div className={`flex gap-0 p-5 min-h-[480px] ${hasCoverBand ? "pt-4" : "pt-14"}`}>          {/* ===== MAIN COLUMN ===== */}          <div className="flex-1 min-w-0 pr-6 space-y-5">            {/* Title */}            <div className="flex items-start gap-3">              <div className="mt-3 text-[#44546f] shrink-0"><LayoutGrid className="h-5 w-5" /></div>              <div className="flex-1 min-w-0">                <p className="tm-task-id-label ml-2 mb-1">{taskDisplayId}</p>                {editingTitle ? <textarea className="w-full text-xl font-bold rounded-lg px-2 py-1.5 resize-none text-[#172b4d] leading-snug border-2 border-[#0c66e4] bg-white focus:outline-none" value={title} rows={2} onChange={e => setTitle(e.target.value)} onBlur={() => {
                 setEditingTitle(false);
                 void saveTitle();
               }} onKeyDown={e => {
@@ -1042,12 +1061,12 @@ export function CardDetailDrawer({
                     }
                   }} />                      </div>                      <div>                        <p className="text-sm font-semibold text-[#172b4d] mb-2">                          {"\u8272\u3092\u9078\u629e"}                        </p>                        <div className="grid grid-cols-5 gap-2">                          {LABEL_CREATE_COLOR_OPTIONS.map(color => <button key={color} type="button" onClick={() => setLabelDraftColor(color)} className={`h-8 rounded-md border transition ${labelDraftColor === color ? "border-[#0c66e4] ring-2 ring-[#0c66e4]/30" : "border-transparent hover:border-[#a5adba]"}`} style={{
                       backgroundColor: color
-                    }} aria-label={`${"\u8272"} ${color}`} />)}                        </div>                      </div>                      <button type="button" onClick={() => setLabelDraftColor(null)} className="w-full rounded-md bg-[#f1f2f4] px-3 py-2 text-sm font-semibold text-[#44546f] hover:bg-[#dfe1e6]">                        {"\u00d7 \u8272\u3092\u524a\u9664"}                      </button>                      <div className="border-t border-[#dfe1e6] pt-3">                        <button type="button" onClick={() => void createLabelFromDraft()} disabled={creatingLabel} className="rounded-md bg-[#0c66e4] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">                          {creatingLabel ? "\u4f5c\u6210\u4e2d..." : "\u4f5c\u6210"}                        </button>                      </div>                    </div>}                  {/* Dates panel */}                  {activePanel === "dates" && <div className="space-y-3">                      <div>                        <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                          開始日                        </label>                        <input type="datetime-local" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={startAt} onChange={e => setStartAt(e.target.value)} />                      </div>                      <div>                        <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                          期限日                        </label>                        <input type="datetime-local" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={dueAt} onChange={e => setDueAt(e.target.value)} />                      </div>                      <div className="flex gap-2 flex-wrap">                        <button type="button" onClick={() => {
+                    }} aria-label={`${"\u8272"} ${color}`} />)}                        </div>                      </div>                      <button type="button" onClick={() => setLabelDraftColor(null)} className="w-full rounded-md bg-[#f1f2f4] px-3 py-2 text-sm font-semibold text-[#44546f] hover:bg-[#dfe1e6]">                        {"\u00d7 \u8272\u3092\u524a\u9664"}                      </button>                      <div className="border-t border-[#dfe1e6] pt-3">                        <button type="button" onClick={() => void createLabelFromDraft()} disabled={creatingLabel} className="rounded-md bg-[#0c66e4] px-4 py-2 text-sm font-semibold text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">                          {creatingLabel ? "\u4f5c\u6210\u4e2d..." : "\u4f5c\u6210"}                        </button>                      </div>                    </div>}                  {/* Dates panel */}                  {activePanel === "dates" && <div className="space-y-3">                      <div>                        <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                          開始日                        </label>                        <input type="date" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={startAt} onChange={e => setStartAt(e.target.value)} />                      </div>                      <div>                        <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                          期限日                        </label>                        <input type="date" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={dueAt} onChange={e => setDueAt(e.target.value)} />                      </div>                      <div className="flex gap-2 flex-wrap">                        <button type="button" onClick={() => {
                     void saveDates();
                     setActivePanel(null);
                   }} className="bg-[#0c66e4] text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-[#0055cc]">                          保存                        </button>                        <button type="button" onClick={() => {
-                    setStartAt(card.start_at ? new Date(card.start_at).toISOString().slice(0, 16) : "");
-                    setDueAt(card.due_at ? new Date(card.due_at).toISOString().slice(0, 16) : "");
+                    setStartAt(toDateInputValue(card.start_at));
+                    setDueAt(toDateInputValue(card.due_at));
                     setActivePanel(null);
                   }} className="text-[#172b4d] hover:bg-[#dfe1e6] rounded-lg px-3 py-2 text-sm">                          キャンセル                        </button>                        {(startAt || dueAt) && <button type="button" onClick={() => {
                     setStartAt("");
@@ -1192,10 +1211,6 @@ export function CardDetailDrawer({
                 }).then(onCardPatched);
               }}>                  {lists.map(list => <option key={list.id} value={list.id}>                      {list.name}                    </option>)}                </select>              </div>            </div>          </div>        </div>        {/* Error banner */}        {error && <div className="mx-5 mb-4 rounded-lg bg-[#ffeceb] border border-[#ffd2d2] text-[#c9372c] px-4 py-3 text-sm flex items-center justify-between">            <span>{error}</span>            <button type="button" onClick={() => setError(null)} className="ml-2 font-bold text-base leading-none">              ×            </button>          </div>}      </div>    </div>;
 }
-
-
-
-
 
 
 

@@ -214,7 +214,7 @@ export function PublicBoardClient({
                     >
                       <p className="text-sm font-semibold text-slate-900">{card.title}</p>
                       <p className="mt-1 text-xs text-slate-700">
-                        {card.due_at ? `Due: ${new Date(card.due_at).toLocaleString("ja-JP")}` : "No due date"}
+                        {card.due_at ? `Due: ${new Date(card.due_at).toLocaleDateString("ja-JP")}` : "No due date"}
                       </p>
                     </button>
                   ))}
@@ -250,12 +250,12 @@ export function PublicBoardClient({
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-400">{"\u958b\u59cb\u65e5\u6642"}</p>
-                    <p className="mt-1 text-sm">{selectedCard.start_at ? new Date(selectedCard.start_at).toLocaleString("ja-JP") : "-"}</p>
+                    <p className="text-xs uppercase tracking-wide text-slate-400">{"\u958b\u59cb\u65e5"}</p>
+                    <p className="mt-1 text-sm">{selectedCard.start_at ? new Date(selectedCard.start_at).toLocaleDateString("ja-JP") : "-"}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-400">{"\u671f\u9650"}</p>
-                    <p className="mt-1 text-sm">{selectedCard.due_at ? new Date(selectedCard.due_at).toLocaleString("ja-JP") : "-"}</p>
+                    <p className="mt-1 text-sm">{selectedCard.due_at ? new Date(selectedCard.due_at).toLocaleDateString("ja-JP") : "-"}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-400">{"\u5b8c\u4e86\u72b6\u614b"}</p>

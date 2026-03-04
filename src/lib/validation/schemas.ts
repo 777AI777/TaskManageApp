@@ -1,4 +1,15 @@
-﻿import { z } from "zod";
+import { z } from "zod";
+
+import { isValidBoardCode, normalizeBoardCodeInput } from "@/lib/task-id";
+
+const boardCodeSchema = z
+  .string()
+  .min(2)
+  .max(32)
+  .transform((value) => normalizeBoardCodeInput(value))
+  .refine((value) => isValidBoardCode(value), {
+    message: "Board ID must be 2-10 uppercase letters, numbers, hyphens, or underscores.",
+  });
 
 export const inviteSchema = z.object({
   workspaceId: z.uuid(),
@@ -14,6 +25,7 @@ export const workspaceCreateSchema = z.object({
 export const boardCreateSchema = z.object({
   workspaceId: z.uuid(),
   name: z.string().min(2).max(100),
+  boardCode: boardCodeSchema,
   description: z.string().max(500).nullable().optional(),
   color: z.string().max(32).nullable().optional(),
   templateId: z.uuid().nullable().optional(),
@@ -22,6 +34,7 @@ export const boardCreateSchema = z.object({
 
 export const boardPatchSchema = z.object({
   name: z.string().min(2).max(100).optional(),
+  boardCode: boardCodeSchema.optional(),
   description: z.string().max(500).nullable().optional(),
   color: z.string().max(32).nullable().optional(),
   slug: z.string().min(3).max(80).regex(/^[a-z0-9-]+$/).optional(),
@@ -80,6 +93,10 @@ export const cardMoveSchema = z.object({
 
 export const commentCreateSchema = z.object({
   content: z.string().min(1).max(2000),
+});
+
+export const boardChatMessageCreateSchema = z.object({
+  content: z.string().trim().min(1).max(2000),
 });
 
 export const checklistCreateSchema = z.object({
@@ -223,4 +240,3 @@ export const boardPowerUpPatchSchema = z.object({
   isEnabled: z.boolean(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
-

@@ -32,6 +32,7 @@ export interface Workspace {
 export interface Board {
   id: string;
   workspace_id: string;
+  board_code: string;
   name: string;
   slug: string;
   description: string | null;
@@ -57,6 +58,7 @@ export interface List {
 export interface Card {
   id: string;
   board_id: string;
+  task_number: number;
   list_id: string;
   title: string;
   description: string | null;

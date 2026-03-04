@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { CardDeadlineState } from "@/lib/board-utils";
+import type { TableSortKey, TableSortState } from "@/lib/table-sort";
+import { getAriaSortValue } from "@/lib/table-sort";
 
-type TableRow = {
+export type TableRow = {
   id: string;
+  taskId: string;
   title: string;
   listId: string;
   listName: string;
@@ -27,6 +30,10 @@ type SelectOption = {
   name: string;
 };
 
+const MULTISELECT_MENU_MAX_HEIGHT = 220;
+const MULTISELECT_MENU_OFFSET = 4;
+const MULTISELECT_VIEWPORT_PADDING = 8;
+
 type Props = {
   rows: TableRow[];
   customFieldColumns: Array<{ id: string; name: string }>;
@@ -34,6 +41,8 @@ type Props = {
   labels: SelectOption[];
   members: SelectOption[];
   savingByCardId: Record<string, boolean>;
+  sortState: TableSortState;
+  onSort: (key: TableSortKey) => void;
   onSelectCard: (cardId: string) => void;
   onListChange: (cardId: string, listId: string) => void;
   onLabelsChange: (cardId: string, labelIds: string[]) => void;
@@ -48,6 +57,38 @@ function getMultiSelectSummary(selectedIds: string[], options: SelectOption[]): 
   if (!selectedNames.length) return "-";
   if (selectedNames.length === 1) return selectedNames[0];
   return `${selectedNames[0]} +${selectedNames.length - 1}`;
+}
+
+function SortableHeader({
+  label,
+  sortKey,
+  sortState,
+  onSort,
+}: {
+  label: string;
+  sortKey: TableSortKey;
+  sortState: TableSortState;
+  onSort: (key: TableSortKey) => void;
+}) {
+  const ariaSort = getAriaSortValue(sortState, sortKey);
+  const isActive = sortState?.key === sortKey;
+  const direction = isActive ? sortState.direction : null;
+
+  return (
+    <th className="tm-table-sort-header" aria-sort={ariaSort}>
+      <button
+        type="button"
+        className={`tm-table-sort-button ${isActive ? "tm-table-sort-button-active" : ""}`}
+        onClick={() => onSort(sortKey)}
+        aria-label={`${label}で並び替え`}
+      >
+        <span>{label}</span>
+        <span className="tm-table-sort-indicator" aria-hidden="true">
+          {direction === "asc" ? "▲" : direction === "desc" ? "▼" : "↕"}
+        </span>
+      </button>
+    </th>
+  );
 }
 
 function MultiSelectDropdown({
@@ -66,9 +107,32 @@ function MultiSelectDropdown({
   onChange: (nextIds: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [menuPlacement, setMenuPlacement] = useState<"down" | "up">("down");
+  const [menuMaxHeight, setMenuMaxHeight] = useState<number>(MULTISELECT_MENU_MAX_HEIGHT);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const summary = getMultiSelectSummary(selectedIds, options);
+
+  const updateMenuPlacement = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const spaceBelow = Math.max(
+      0,
+      window.innerHeight - rect.bottom - MULTISELECT_VIEWPORT_PADDING - MULTISELECT_MENU_OFFSET,
+    );
+    const spaceAbove = Math.max(0, rect.top - MULTISELECT_VIEWPORT_PADDING - MULTISELECT_MENU_OFFSET);
+    const nextPlacement: "down" | "up" =
+      spaceBelow < MULTISELECT_MENU_MAX_HEIGHT && spaceAbove > spaceBelow ? "up" : "down";
+    const availableSpace = nextPlacement === "up" ? spaceAbove : spaceBelow;
+
+    setMenuPlacement(nextPlacement);
+    setMenuMaxHeight(
+      availableSpace > 0 ? Math.min(MULTISELECT_MENU_MAX_HEIGHT, availableSpace) : MULTISELECT_MENU_MAX_HEIGHT,
+    );
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -92,6 +156,18 @@ function MultiSelectDropdown({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    updateMenuPlacement();
+
+    window.addEventListener("resize", updateMenuPlacement);
+    window.addEventListener("scroll", updateMenuPlacement, true);
+    return () => {
+      window.removeEventListener("resize", updateMenuPlacement);
+      window.removeEventListener("scroll", updateMenuPlacement, true);
+    };
+  }, [open, updateMenuPlacement]);
+
   function handleToggleOption(optionId: string, checked: boolean) {
     const nextSet = new Set(selectedIds);
     if (checked) {
@@ -107,6 +183,7 @@ function MultiSelectDropdown({
     <div className="tm-table-multiselect" ref={rootRef}>
       <button
         type="button"
+        ref={triggerRef}
         className="tm-table-multiselect-trigger"
         aria-label={triggerLabel}
         aria-haspopup="menu"
@@ -117,7 +194,12 @@ function MultiSelectDropdown({
         {summary === "-" ? emptyLabel : summary}
       </button>
       {open ? (
-        <div className="tm-table-multiselect-menu" role="menu" aria-label={triggerLabel}>
+        <div
+          className={`tm-table-multiselect-menu ${menuPlacement === "up" ? "tm-table-multiselect-menu-up" : ""}`}
+          role="menu"
+          aria-label={triggerLabel}
+          style={{ maxHeight: `${menuMaxHeight}px` }}
+        >
           {options.length ? (
             options.map((option) => (
               <label key={option.id} className="tm-table-multiselect-option">
@@ -146,6 +228,8 @@ export function TableView({
   labels,
   members,
   savingByCardId,
+  sortState,
+  onSort,
   onSelectCard,
   onListChange,
   onLabelsChange,
@@ -158,17 +242,22 @@ export function TableView({
       <table className="tm-table min-w-full text-sm">
         <thead className="tm-table-head">
           <tr>
-            <th className="px-4 py-3 text-left">カード</th>
-            <th className="px-4 py-3 text-left">リスト</th>
-            <th className="px-4 py-3 text-left">ラベル</th>
-            <th className="px-4 py-3 text-left">担当</th>
+            <SortableHeader label="ID" sortKey="taskId" sortState={sortState} onSort={onSort} />
+            <SortableHeader label="カード" sortKey="title" sortState={sortState} onSort={onSort} />
+            <SortableHeader label="リスト" sortKey="list" sortState={sortState} onSort={onSort} />
+            <SortableHeader label="ラベル" sortKey="labels" sortState={sortState} onSort={onSort} />
+            <SortableHeader label="担当者" sortKey="assignees" sortState={sortState} onSort={onSort} />
             {customFieldColumns.map((column) => (
-              <th key={column.id} className="px-4 py-3 text-left">
-                {column.name}
-              </th>
+              <SortableHeader
+                key={column.id}
+                label={column.name}
+                sortKey={`custom:${column.id}`}
+                sortState={sortState}
+                onSort={onSort}
+              />
             ))}
-            <th className="px-4 py-3 text-left">期限</th>
-            <th className="px-4 py-3 text-left">状態</th>
+            <SortableHeader label="期限日" sortKey="dueAt" sortState={sortState} onSort={onSort} />
+            <SortableHeader label="状態" sortKey="status" sortState={sortState} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
@@ -178,8 +267,11 @@ export function TableView({
               <tr key={row.id} className={`tm-table-row ${isSaving ? "tm-table-row-saving" : ""}`}>
                 <td className="px-4 py-3">
                   <button className="tm-table-link text-left" onClick={() => onSelectCard(row.id)}>
-                    {row.title}
+                    {row.taskId}
                   </button>
+                </td>
+                <td className="px-4 py-3">
+                  <span className="tm-table-task-link">{row.title}</span>
                 </td>
                 <td className="px-4 py-3">
                   <select
@@ -211,7 +303,7 @@ export function TableView({
                     selectedIds={row.assigneeIds}
                     options={members}
                     disabled={isSaving}
-                    triggerLabel="担当を編集"
+                    triggerLabel="担当者を編集"
                     emptyLabel="-"
                     onChange={(nextIds) => onAssigneesChange(row.id, nextIds)}
                   />
@@ -229,7 +321,7 @@ export function TableView({
                       value={row.dueDateValue}
                       onChange={(event) => onDueDateChange(row.id, event.target.value || null)}
                       disabled={isSaving}
-                      aria-label="期限"
+                      aria-label="期限日"
                     />
                     <button
                       type="button"
@@ -258,7 +350,7 @@ export function TableView({
           })}
           {!rows.length ? (
             <tr>
-              <td colSpan={6 + customFieldColumns.length} className="px-4 py-10 text-center text-slate-500">
+              <td colSpan={7 + customFieldColumns.length} className="px-4 py-10 text-center text-slate-500">
                 表示できるカードがありません。
               </td>
             </tr>

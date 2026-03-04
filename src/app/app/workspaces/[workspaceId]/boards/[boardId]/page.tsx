@@ -22,7 +22,7 @@ export default async function BoardPage({
     supabase.from("workspaces").select("id, name, slug").eq("id", workspaceId).maybeSingle(),
     supabase
       .from("boards")
-      .select("id, name, slug, description, color, visibility")
+      .select("id, board_code, name, slug, description, color, visibility")
       .eq("id", boardId)
       .eq("is_archived", false)
       .maybeSingle(),
@@ -53,6 +53,7 @@ export default async function BoardPage({
     { data: boardMembers },
     { data: preferences },
     { data: customFields },
+    { data: boardChatMessages },
   ] = await Promise.all([
     supabase.from("lists").select("*").eq("board_id", boardId).eq("is_archived", false).order("position"),
     supabase.from("cards").select("*").eq("board_id", boardId).eq("archived", false).order("position"),
@@ -65,6 +66,12 @@ export default async function BoardPage({
       .eq("user_id", user.id)
       .maybeSingle(),
     supabase.from("custom_fields").select("*").eq("board_id", boardId).order("position"),
+    supabase
+      .from("board_chat_messages")
+      .select("id, board_id, user_id, content, created_at")
+      .eq("board_id", boardId)
+      .order("created_at", { ascending: false })
+      .limit(50),
   ]);
 
   const cardIds = (cards ?? []).map((card) => card.id);
@@ -131,6 +138,7 @@ export default async function BoardPage({
     },
     board: {
       id: board.id,
+      board_code: board.board_code,
       name: board.name,
       slug: board.slug,
       description: board.description,
@@ -150,6 +158,7 @@ export default async function BoardPage({
     customFields: (customFields ?? []) as BoardDataBundle["customFields"],
     cardCustomFieldValues: (cardCustomFieldValues ?? []) as BoardDataBundle["cardCustomFieldValues"],
     preferences: (preferences ?? null) as BoardDataBundle["preferences"],
+    boardChatMessages: [...(boardChatMessages ?? [])].reverse() as BoardDataBundle["boardChatMessages"],
   };
 
   return <BoardClient initialData={initialData} />;

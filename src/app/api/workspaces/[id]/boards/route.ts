@@ -5,10 +5,19 @@ import { parseBody } from "@/lib/api";
 import { applyBoardTemplate, defaultBoardTemplatePayload } from "@/lib/templates";
 import { ApiError, fail, ok, parseJsonSafely } from "@/lib/http";
 import { assertWorkspaceRole } from "@/lib/permissions";
+import { isValidBoardCode, normalizeBoardCodeInput } from "@/lib/task-id";
 import { slugify } from "@/lib/utils";
 
 const boardCreatePayloadSchema = z.object({
   name: z.string().min(2).max(100),
+  boardCode: z
+    .string()
+    .min(2)
+    .max(32)
+    .transform((value) => normalizeBoardCodeInput(value))
+    .refine((value) => isValidBoardCode(value), {
+      message: "Board ID must be 2-10 uppercase letters, numbers, hyphens, or underscores.",
+    }),
   description: z.string().max(500).nullable().optional(),
   color: z.string().max(32).nullable().optional(),
   templateId: z.uuid().nullable().optional(),
@@ -31,6 +40,7 @@ export async function POST(
       .insert({
         workspace_id: workspaceId,
         name: payload.name,
+        board_code: payload.boardCode,
         slug: `${slugBase}-${crypto.randomUUID().slice(0, 6)}`,
         description: payload.description ?? null,
         color: payload.color ?? "#2563eb",
@@ -41,6 +51,9 @@ export async function POST(
       .single();
 
     if (boardError) {
+      if (boardError.code === "23505") {
+        throw new ApiError(409, "board_code_conflict", "Board ID already exists in this workspace.");
+      }
       throw new ApiError(500, "board_create_failed", boardError.message);
     }
 

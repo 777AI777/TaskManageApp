@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 
 import { BOARD_ERROR_MESSAGES } from "@/lib/board-ui-text";
+import { isValidBoardCode, normalizeBoardCodeInput } from "@/lib/task-id";
 
 type Props = {
   workspaceId: string;
@@ -26,6 +27,7 @@ export function CreateBoardForm({
 }: Props) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [boardCode, setBoardCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +35,11 @@ export function CreateBoardForm({
     event.preventDefault();
     if (!name.trim()) {
       setError("ボード名は必須です。");
+      return;
+    }
+
+    if (!isValidBoardCode(boardCode)) {
+      setError("ボードIDは英数字・ハイフン・アンダースコアの2〜10文字で入力してください。");
       return;
     }
 
@@ -44,6 +51,7 @@ export function CreateBoardForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
+          boardCode,
         }),
       });
       const body = await response.json();
@@ -99,15 +107,34 @@ export function CreateBoardForm({
             className="input"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="例: プロダクト企画"
+            placeholder="例: プロダクト開発"
             required
           />
           {!name.trim() ? <p className="mt-1 text-xs text-amber-700">ボード名は必須です。</p> : null}
         </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium">ボードID *</label>
+          <input
+            className="input"
+            value={boardCode}
+            onChange={(event) => setBoardCode(normalizeBoardCodeInput(event.target.value))}
+            placeholder="例: AWS"
+            maxLength={10}
+            required
+          />
+          {!isValidBoardCode(boardCode) ? (
+            <p className="mt-1 text-xs text-amber-700">英数字・-・_ の2〜10文字（自動で大文字化）</p>
+          ) : null}
+        </div>
       </div>
 
       {error ? <p className="mt-2 text-sm text-red-600">{error}</p> : null}
-      <button className="btn btn-primary mt-4 w-full" type="submit" disabled={loading || !name.trim()}>
+      <button
+        className="btn btn-primary mt-4 w-full"
+        type="submit"
+        disabled={loading || !name.trim() || !isValidBoardCode(boardCode)}
+      >
         {loading ? "作成中..." : "作成"}
       </button>
     </form>

@@ -437,10 +437,6 @@ export function TimelineView({
           </button>
         </div>
 
-        <div className="tm-timeline-topbar-group">
-          <span className="tm-timeline-chip">{"\u9031"}</span>
-          <span className="tm-timeline-chip">{"\u30ea\u30b9\u30c8"}</span>
-        </div>
       </header>
 
       <div className="tm-timeline-scroll">

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { addDays, addMonths, endOfDay } from "date-fns";
+import { addDays, endOfDay } from "date-fns";
 
 import {
   canManageBoard,
   getReorderedItemPosition,
+  matchesCardListFilters,
+  matchesCardStatusFilters,
   matchesDueBucket,
   matchesDueFilter,
   nextOnboardingState,
@@ -46,17 +48,43 @@ describe("matchesDueBucket", () => {
     expect(matchesDueBucket(upper.toISOString(), "due-until-next-day", now)).toBe(true);
     expect(matchesDueBucket(new Date(upper.getTime() + 1).toISOString(), "due-until-next-day", now)).toBe(false);
   });
+});
 
-  it("matches due until next week bucket with inclusive boundary", () => {
-    const upper = endOfDay(addDays(now, 7));
-    expect(matchesDueBucket(upper.toISOString(), "due-until-next-week", now)).toBe(true);
-    expect(matchesDueBucket(new Date(upper.getTime() + 1).toISOString(), "due-until-next-week", now)).toBe(false);
+describe("matchesCardStatusFilters", () => {
+  it("returns true for completed and non-completed when no filters are selected", () => {
+    const filters = { completed: false, nonCompleted: false };
+    expect(matchesCardStatusFilters(true, filters)).toBe(true);
+    expect(matchesCardStatusFilters(false, filters)).toBe(true);
   });
 
-  it("matches due until next month bucket with inclusive boundary", () => {
-    const upper = endOfDay(addMonths(now, 1));
-    expect(matchesDueBucket(upper.toISOString(), "due-until-next-month", now)).toBe(true);
-    expect(matchesDueBucket(new Date(upper.getTime() + 1).toISOString(), "due-until-next-month", now)).toBe(false);
+  it("matches only completed when completed filter is selected", () => {
+    const filters = { completed: true, nonCompleted: false };
+    expect(matchesCardStatusFilters(true, filters)).toBe(true);
+    expect(matchesCardStatusFilters(false, filters)).toBe(false);
+  });
+
+  it("matches only non-completed when nonCompleted filter is selected", () => {
+    const filters = { completed: false, nonCompleted: true };
+    expect(matchesCardStatusFilters(true, filters)).toBe(false);
+    expect(matchesCardStatusFilters(false, filters)).toBe(true);
+  });
+
+  it("matches both completed and non-completed when both filters are selected", () => {
+    const filters = { completed: true, nonCompleted: true };
+    expect(matchesCardStatusFilters(true, filters)).toBe(true);
+    expect(matchesCardStatusFilters(false, filters)).toBe(true);
+  });
+});
+
+describe("matchesCardListFilters", () => {
+  it("returns true for any list when no list filter is selected", () => {
+    expect(matchesCardListFilters("list-a", { listIds: [] })).toBe(true);
+  });
+
+  it("matches only included list ids", () => {
+    const filters = { listIds: ["list-a", "list-b"] };
+    expect(matchesCardListFilters("list-a", filters)).toBe(true);
+    expect(matchesCardListFilters("list-c", filters)).toBe(false);
   });
 });
 

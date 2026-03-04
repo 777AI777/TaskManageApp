@@ -21,7 +21,7 @@ export default async function BoardPage({
 
   const { data: visibleBoard } = await supabase
     .from("boards")
-    .select("id, workspace_id, name, slug, description, color, visibility")
+    .select("id, workspace_id, board_code, name, slug, description, color, visibility")
     .eq("slug", slug)
     .eq("is_archived", false)
     .maybeSingle();
@@ -32,7 +32,7 @@ export default async function BoardPage({
       const admin = createSupabaseAdminClient();
       const { data: hiddenBoard, error: hiddenBoardError } = await admin
         .from("boards")
-        .select("id, workspace_id, name, slug, description, color, visibility")
+        .select("id, workspace_id, board_code, name, slug, description, color, visibility")
         .eq("slug", slug)
         .eq("is_archived", false)
         .maybeSingle();
@@ -142,7 +142,7 @@ async function getPrivateBoardBundle({
     supabase.from("workspaces").select("id, name, slug").eq("id", workspaceId).maybeSingle(),
     supabase
       .from("boards")
-      .select("id, name, slug, description, color, visibility")
+      .select("id, board_code, name, slug, description, color, visibility")
       .eq("id", boardId)
       .eq("is_archived", false)
       .maybeSingle(),
@@ -165,6 +165,7 @@ async function getPrivateBoardBundle({
     { data: boardMembers },
     { data: preferences },
     { data: customFields },
+    { data: boardChatMessages },
   ] = await Promise.all([
     supabase.from("lists").select("*").eq("board_id", boardId).eq("is_archived", false).order("position"),
     supabase.from("cards").select("*").eq("board_id", boardId).eq("archived", false).order("position"),
@@ -177,6 +178,12 @@ async function getPrivateBoardBundle({
       .eq("user_id", currentUserId)
       .maybeSingle(),
     supabase.from("custom_fields").select("*").eq("board_id", boardId).order("position"),
+    supabase
+      .from("board_chat_messages")
+      .select("id, board_id, user_id, content, created_at")
+      .eq("board_id", boardId)
+      .order("created_at", { ascending: false })
+      .limit(50),
   ]);
 
   const cardIds = (cards ?? []).map((card) => card.id);
@@ -238,6 +245,7 @@ async function getPrivateBoardBundle({
     },
     board: {
       id: board.id,
+      board_code: board.board_code,
       name: board.name,
       slug: board.slug,
       description: board.description,
@@ -257,6 +265,7 @@ async function getPrivateBoardBundle({
     customFields: (customFields ?? []) as BoardDataBundle["customFields"],
     cardCustomFieldValues: (cardCustomFieldValues ?? []) as BoardDataBundle["cardCustomFieldValues"],
     preferences: (preferences ?? null) as BoardDataBundle["preferences"],
+    boardChatMessages: [...(boardChatMessages ?? [])].reverse() as BoardDataBundle["boardChatMessages"],
   };
 }
 

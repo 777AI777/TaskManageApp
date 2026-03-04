@@ -1,4 +1,4 @@
-import { addDays, addMonths, endOfDay, endOfWeek, isAfter, isBefore, startOfDay } from "date-fns";
+import { addDays, endOfDay, endOfWeek, isAfter, isBefore, startOfDay } from "date-fns";
 
 import type { Role } from "@/lib/types";
 
@@ -6,10 +6,15 @@ export type DueFilterMode = "" | "overdue" | "today" | "tomorrow" | "next-week" 
 export type DueBucket =
   | "no-due-date"
   | "overdue"
-  | "due-until-next-day"
-  | "due-until-next-week"
-  | "due-until-next-month";
+  | "due-until-next-day";
 export type CardDeadlineState = "none" | "upcoming" | "due-today" | "overdue" | "completed";
+export type CardStatusFilters = {
+  completed: boolean;
+  nonCompleted: boolean;
+};
+export type CardListFilters = {
+  listIds: string[];
+};
 type SortablePositionItem = {
   id: string;
   position: number;
@@ -30,9 +35,23 @@ export function matchesDueBucket(
 
   if (bucket === "overdue") return isBefore(dueAt, now);
   if (bucket === "due-until-next-day") return isWithinInclusiveRange(dueAt, now, endOfDay(addDays(now, 1)));
-  if (bucket === "due-until-next-week") return isWithinInclusiveRange(dueAt, now, endOfDay(addDays(now, 7)));
-  if (bucket === "due-until-next-month") return isWithinInclusiveRange(dueAt, now, endOfDay(addMonths(now, 1)));
   return false;
+}
+
+export function matchesCardStatusFilters(
+  isCompleted: boolean,
+  filters: CardStatusFilters,
+): boolean {
+  if (!filters.completed && !filters.nonCompleted) return true;
+  return (filters.completed && isCompleted) || (filters.nonCompleted && !isCompleted);
+}
+
+export function matchesCardListFilters(
+  listId: string,
+  filters: CardListFilters,
+): boolean {
+  if (filters.listIds.length === 0) return true;
+  return filters.listIds.includes(listId);
 }
 
 function isSameLocalDay(left: Date, right: Date): boolean {

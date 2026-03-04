@@ -186,7 +186,7 @@ export default async function WorkspaceDetailPage({
                     </td>
                     <td className="px-3 py-2">{board?.name ?? "-"}</td>
                     <td className="px-3 py-2">{list?.name ?? "-"}</td>
-                    <td className="px-3 py-2">{card.due_at ? new Date(card.due_at).toLocaleString() : "-"}</td>
+                    <td className="px-3 py-2">{card.due_at ? new Date(card.due_at).toLocaleDateString("ja-JP") : "-"}</td>
                     <td className="px-3 py-2">{card.is_completed ? "完了" : "未完了"}</td>
                   </tr>
                 );

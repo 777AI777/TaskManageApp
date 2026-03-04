@@ -16,6 +16,7 @@ export async function PATCH(
 
     const updatePayload: Record<string, unknown> = {};
     if (payload.name !== undefined) updatePayload.name = payload.name;
+    if (payload.boardCode !== undefined) updatePayload.board_code = payload.boardCode;
     if (payload.description !== undefined) updatePayload.description = payload.description;
     if (payload.color !== undefined) updatePayload.color = payload.color;
     if (payload.slug !== undefined) updatePayload.slug = payload.slug;
@@ -30,6 +31,9 @@ export async function PATCH(
       .select("*")
       .single();
     if (error) {
+      if (error.code === "23505") {
+        throw new ApiError(409, "board_code_conflict", "Board ID already exists in this workspace.");
+      }
       throw new ApiError(500, "board_update_failed", error.message);
     }
 

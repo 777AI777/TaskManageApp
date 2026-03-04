@@ -13,6 +13,7 @@ export type BoardList = {
 export type BoardCard = {
   id: string;
   board_id: string;
+  task_number: number;
   list_id: string;
   title: string;
   description: string | null;
@@ -74,6 +75,14 @@ export type BoardMember = {
 export type CardComment = {
   id: string;
   card_id: string;
+  user_id: string;
+  content: string;
+  created_at: string;
+};
+
+export type BoardChatMessage = {
+  id: string;
+  board_id: string;
   user_id: string;
   content: string;
   created_at: string;
@@ -197,6 +206,7 @@ export type BoardDataBundle = {
   };
   board: {
     id: string;
+    board_code: string;
     name: string;
     slug: string;
     description: string | null;
@@ -212,6 +222,7 @@ export type BoardDataBundle = {
   customFields: CustomField[];
   cardCustomFieldValues: CardCustomFieldValue[];
   preferences: UserBoardPreferences | null;
+  boardChatMessages: BoardChatMessage[];
 };
 
 export type CardDetailData = {

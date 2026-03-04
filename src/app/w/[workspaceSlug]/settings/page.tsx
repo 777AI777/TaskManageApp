@@ -48,7 +48,7 @@ export default async function WorkspaceSettingsPage({
 
   let members: Array<{ user_id: string; role: string; joined_at: string | null }> = [];
   let profiles: Array<{ id: string; display_name: string | null; email: string | null }> = [];
-  let boards: Array<{ id: string; name: string; slug: string }> = [];
+  let boards: Array<{ id: string; name: string; slug: string; board_code: string }> = [];
   let myBoardMemberships: Array<{ board_id: string; role: string }> = [];
 
   if (selectedTab === "members") {
@@ -72,11 +72,11 @@ export default async function WorkspaceSettingsPage({
   if (selectedTab === "board-management") {
     const { data: boardRows } = await supabase
       .from("boards")
-      .select("id, name, slug")
+      .select("id, name, slug, board_code")
       .eq("workspace_id", workspace.id)
       .eq("is_archived", false)
       .order("created_at", { ascending: true });
-    boards = (boardRows ?? []) as Array<{ id: string; name: string; slug: string }>;
+    boards = (boardRows ?? []) as Array<{ id: string; name: string; slug: string; board_code: string }>;
 
     const boardIds = boards.map((board) => board.id);
     if (boardIds.length) {
@@ -100,6 +100,7 @@ export default async function WorkspaceSettingsPage({
       id: board.id,
       name: board.name,
       slug: board.slug,
+      boardCode: board.board_code,
       canArchive:
         workspace.role === "workspace_admin" ||
         boardRole === "workspace_admin" ||
