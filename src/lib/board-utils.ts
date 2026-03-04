@@ -10,6 +10,10 @@ export type DueBucket =
   | "due-until-next-week"
   | "due-until-next-month";
 export type CardDeadlineState = "none" | "upcoming" | "due-today" | "overdue" | "completed";
+type SortablePositionItem = {
+  id: string;
+  position: number;
+};
 
 function isWithinInclusiveRange(target: Date, from: Date, to: Date): boolean {
   return !isBefore(target, from) && !isAfter(target, to);
@@ -82,4 +86,44 @@ export function nextOnboardingState(currentStep: number, totalSteps: number) {
 
 export function canManageBoard(role: Role) {
   return role === "workspace_admin" || role === "board_admin";
+}
+
+export function getReorderedItemPosition<T extends SortablePositionItem>(
+  items: T[],
+  activeId: string,
+  overId: string,
+): number | null {
+  const ordered = [...items].sort((left, right) => left.position - right.position);
+  const activeIndex = ordered.findIndex((item) => item.id === activeId);
+  const overIndex = ordered.findIndex((item) => item.id === overId);
+  if (activeIndex === -1 || overIndex === -1 || activeIndex === overIndex) {
+    return null;
+  }
+
+  const reordered = [...ordered];
+  const [moving] = reordered.splice(activeIndex, 1);
+  reordered.splice(overIndex, 0, moving);
+
+  const movingIndex = reordered.findIndex((item) => item.id === moving.id);
+  const previous = movingIndex > 0 ? reordered[movingIndex - 1] : null;
+  const next = movingIndex < reordered.length - 1 ? reordered[movingIndex + 1] : null;
+
+  let position: number;
+  if (previous && next) {
+    position =
+      previous.position < next.position
+        ? previous.position + (next.position - previous.position) / 2
+        : previous.position + 1;
+  } else if (previous) {
+    position = previous.position + 1024;
+  } else if (next) {
+    position = next.position > 0 ? next.position / 2 : next.position - 1;
+  } else {
+    return null;
+  }
+
+  if (!Number.isFinite(position) || position === moving.position) {
+    return null;
+  }
+  return position;
 }

@@ -3,6 +3,7 @@ import { addDays, addMonths, endOfDay } from "date-fns";
 
 import {
   canManageBoard,
+  getReorderedItemPosition,
   matchesDueBucket,
   matchesDueFilter,
   nextOnboardingState,
@@ -98,5 +99,31 @@ describe("canManageBoard", () => {
     expect(canManageBoard("workspace_admin")).toBe(true);
     expect(canManageBoard("board_admin")).toBe(true);
     expect(canManageBoard("member")).toBe(false);
+  });
+});
+
+describe("getReorderedItemPosition", () => {
+  const items = [
+    { id: "list-a", position: 1000 },
+    { id: "list-b", position: 2000 },
+    { id: "list-c", position: 3000 },
+  ];
+
+  it("returns midpoint when moving between neighbors", () => {
+    expect(getReorderedItemPosition(items, "list-c", "list-b")).toBe(1500);
+  });
+
+  it("returns half of next position when moving to first place", () => {
+    expect(getReorderedItemPosition(items, "list-c", "list-a")).toBe(500);
+  });
+
+  it("returns previous plus increment when moving to last place", () => {
+    expect(getReorderedItemPosition(items, "list-a", "list-c")).toBe(4024);
+  });
+
+  it("returns null when ids are invalid or unchanged", () => {
+    expect(getReorderedItemPosition(items, "list-a", "list-a")).toBeNull();
+    expect(getReorderedItemPosition(items, "missing", "list-a")).toBeNull();
+    expect(getReorderedItemPosition(items, "list-a", "missing")).toBeNull();
   });
 });

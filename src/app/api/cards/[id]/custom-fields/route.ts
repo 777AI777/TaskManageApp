@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { cardCustomFieldValuesPatchSchema } from "@/lib/validation/schemas";
@@ -143,16 +142,7 @@ export async function PUT(
       throw new ApiError(500, "card_custom_field_values_lookup_failed", valuesError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId,
-      actorId: user.id,
-      action: "card_custom_fields_updated",
-      metadata: {
-        count: payload.values.length,
-      },
-    });
-
+    
     return ok(values ?? []);
   } catch (error) {
     return fail(error as Error);

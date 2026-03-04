@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 
@@ -50,14 +49,7 @@ export async function POST(
       throw new ApiError(500, "card_complete_update_failed", updateError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: id,
-      actorId: user.id,
-      action: payload.isCompleted ? "card_completed" : "card_reopened",
-      metadata: { isCompleted: payload.isCompleted },
-    });
-
+    
     return ok(updatedCard);
   } catch (error) {
     return fail(error as Error);

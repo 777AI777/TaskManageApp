@@ -37,20 +37,10 @@ export interface Board {
   description: string | null;
   color: string | null;
   visibility: "private" | "workspace" | "public";
-  dashboard_tiles: DashboardTile[];
   is_archived: boolean;
   created_by: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface DashboardTile {
-  id: string;
-  chartType: "bar" | "pie" | "line";
-  metric: "cards_per_list" | "due_status" | "cards_per_member" | "cards_per_label";
-  title: string;
-  position: number;
-  size: "half" | "full";
 }
 
 export interface List {
@@ -81,9 +71,6 @@ export interface Card {
   cover_color: string | null;
   cover_type: "none" | "color" | "image";
   cover_value: string | null;
-  location_name: string | null;
-  location_lat: number | null;
-  location_lng: number | null;
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -165,7 +152,7 @@ export interface UserBoardPreferences {
   id: string;
   user_id: string;
   board_id: string;
-  selected_view: "board" | "calendar" | "table" | "timeline" | "dashboard";
+  selected_view: "board" | "calendar" | "table" | "timeline";
   left_rail_collapsed: boolean;
   show_guides: boolean;
   updated_at: string;

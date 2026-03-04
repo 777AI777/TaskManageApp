@@ -26,19 +26,6 @@ export const boardPatchSchema = z.object({
   color: z.string().max(32).nullable().optional(),
   slug: z.string().min(3).max(80).regex(/^[a-z0-9-]+$/).optional(),
   visibility: z.enum(["private", "workspace", "public"]).optional(),
-  dashboardTiles: z
-    .array(
-      z.object({
-        id: z.uuid(),
-        chartType: z.enum(["bar", "pie", "line"]),
-        metric: z.enum(["cards_per_list", "due_status", "cards_per_member", "cards_per_label"]),
-        title: z.string().min(1).max(120),
-        position: z.number().int().nonnegative(),
-        size: z.enum(["half", "full"]),
-      }),
-    )
-    .max(24)
-    .optional(),
   isArchived: z.boolean().optional(),
 });
 
@@ -64,9 +51,6 @@ export const cardCreateSchema = z.object({
   priority: z.enum(["low", "medium", "high", "urgent"]).optional(),
   estimatePoints: z.number().nonnegative().nullable().optional(),
   startAt: z.iso.datetime().nullable().optional(),
-  locationName: z.string().max(255).nullable().optional(),
-  locationLat: z.number().min(-90).max(90).nullable().optional(),
-  locationLng: z.number().min(-180).max(180).nullable().optional(),
   assigneeIds: z.array(z.uuid()).optional(),
   labelIds: z.array(z.uuid()).optional(),
 });
@@ -84,9 +68,6 @@ export const cardPatchSchema = z.object({
   coverColor: z.string().max(32).nullable().optional(),
   coverType: z.enum(["none", "color", "image"]).optional(),
   coverValue: z.string().max(1000).nullable().optional(),
-  locationName: z.string().max(255).nullable().optional(),
-  locationLat: z.number().min(-90).max(90).nullable().optional(),
-  locationLng: z.number().min(-180).max(180).nullable().optional(),
   isCompleted: z.boolean().optional(),
   assigneeIds: z.array(z.uuid()).optional(),
   labelIds: z.array(z.uuid()).optional(),
@@ -199,7 +180,7 @@ export const onboardingSessionPatchSchema = z.object({
 
 export const userBoardPreferencesPatchSchema = z.object({
   boardId: z.uuid(),
-  selectedView: z.enum(["board", "calendar", "table", "timeline", "dashboard"]).optional(),
+  selectedView: z.enum(["board", "calendar", "table", "timeline"]).optional(),
   leftRailCollapsed: z.boolean().optional(),
   showGuides: z.boolean().optional(),
 });

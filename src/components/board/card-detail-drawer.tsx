@@ -1,11 +1,11 @@
 ﻿"use client";
 
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Tag, Clock, CheckSquare, User, Paperclip, MapPin, LayoutGrid, AlignLeft } from "lucide-react";
-import type { Activity, Attachment, BoardCard, BoardList, BoardMember, CardAssignee, CardComment, CardCustomFieldValue, CardLabel, Checklist, ChecklistItem, CustomField, Label } from "@/components/board/board-types";
+import { Tag, Clock, CheckSquare, User, Paperclip, LayoutGrid, AlignLeft, Eye, Archive } from "lucide-react";
+import type { Attachment, BoardCard, BoardList, BoardMember, CardAssignee, CardComment, CardCustomFieldValue, CardLabel, Checklist, ChecklistItem, CustomField, Label } from "@/components/board/board-types";
 import { resolveAvatarColor } from "@/lib/avatar-color";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
-type ActivePanel = "addMenu" | "labels" | "dates" | "checklist" | "members" | "attachment" | "location" | "customFields" | null;
+type ActivePanel = "addMenu" | "labels" | "dates" | "checklist" | "members" | "attachment" | "customFields" | null;
 type LabelPanelMode = "list" | "create";
 type Props = {
   workspaceId: string;
@@ -24,7 +24,6 @@ type Props = {
   checklists: Checklist[];
   checklistItems: ChecklistItem[];
   attachments: Attachment[];
-  activities: Activity[];
   detailLoading?: boolean;
   onClose: () => void;
   onCardPatched: (card: BoardCard) => void;
@@ -72,11 +71,7 @@ const ADD_MENU_OPTIONS: Array<{
   icon: <Paperclip className="w-4 h-4" />,
   label: "添付ファイル",
   desc: "リンク、ページ、作業項目などを追加"
-}, {
-  key: "location",
-  icon: <MapPin className="w-4 h-4" />,
-  label: "場所",
-  desc: "このカードをマップで見る"
+
 }, {
   key: "customFields",
   icon: <LayoutGrid className="w-4 h-4" />,
@@ -89,7 +84,6 @@ const PANEL_LABELS: Record<string, string> = {
   checklist: "チェックリスト",
   members: "メンバー",
   attachment: "添付ファイル",
-  location: "場所",
   customFields: "カスタム日付フィールド"
 };
 const LABEL_PICKER_COLORS = ["#4bce97", "#f5cd47", "#fea362", "#f87168", "#9f8fef", "#579dff"] as const;
@@ -109,102 +103,6 @@ function formatRelativeTime(dateStr: string): string {
   if (minutes < 60) return `${minutes} 分前`;
   if (hours < 24) return `${hours} 時間前`;
   return `${days} 日前`;
-}
-function formatActivityDateTime(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  const datePart = date.toLocaleDateString("ja-JP", {
-    month: "long",
-    day: "numeric"
-  });
-  const timePart = date.toLocaleTimeString("ja-JP", {
-    hour: "numeric",
-    minute: "2-digit"
-  });
-  return `${datePart} ${timePart}`;
-}
-function getListNameById(lists: BoardList[], value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  return lists.find(list => list.id === value)?.name ?? null;
-}
-function formatCardUpdatedMessage(metadata: Record<string, unknown>, lists: BoardList[]): string {
-  if ("dueAt" in metadata) {
-    if (metadata.dueAt === null) return "このカードの期限を削除しました。";
-    const dueLabel = formatActivityDateTime(metadata.dueAt);
-    if (dueLabel) return `このカードの期限を${dueLabel}に変更しました。`;
-    return "このカードの期限を更新しました。";
-  }
-  if ("startAt" in metadata) {
-    if (metadata.startAt === null) return "このカードの開始日を削除しました。";
-    const startLabel = formatActivityDateTime(metadata.startAt);
-    if (startLabel) return `このカードの開始日を${startLabel}に変更しました。`;
-    return "このカードの開始日を更新しました。";
-  }
-  if ("title" in metadata && typeof metadata.title === "string") {
-    return `このカードのタイトルを「${metadata.title}」に変更しました。`;
-  }
-  if ("description" in metadata) {
-    return metadata.description === null ? "このカードの内容を削除しました。" : "このカードの内容を更新しました。";
-  }
-  if ("listId" in metadata) {
-    const listName = getListNameById(lists, metadata.listId);
-    if (listName) return `このカードを「${listName}」に移動しました。`;
-    return "このカードを別のリストに移動しました。";
-  }
-  if ("assigneeIds" in metadata) return "このカードの担当メンバーを変更しました。";
-  if ("labelIds" in metadata) return "このカードのラベルを変更しました。";
-  if ("isCompleted" in metadata && typeof metadata.isCompleted === "boolean") {
-    return metadata.isCompleted ? "このカードを完了にしました。" : "このカードを未完了に戻しました。";
-  }
-  if ("archived" in metadata && typeof metadata.archived === "boolean") {
-    return metadata.archived ? "このカードをアーカイブしました。" : "このカードをアーカイブから戻しました。";
-  }
-  if ("priority" in metadata) return "このカードの優先度を変更しました。";
-  if ("estimatePoints" in metadata) return "このカードの見積もりポイントを変更しました。";
-  return "このカードを更新しました。";
-}
-function formatChecklistItemUpdatedMessage(metadata: Record<string, unknown>): string {
-  if ("isCompleted" in metadata && typeof metadata.isCompleted === "boolean") {
-    return metadata.isCompleted ? "チェックリスト項目を完了にしました。" : "チェックリスト項目を未完了に戻しました。";
-  }
-  if ("dueAt" in metadata) {
-    if (metadata.dueAt === null) return "チェックリスト項目の期限を削除しました。";
-    const dueLabel = formatActivityDateTime(metadata.dueAt);
-    if (dueLabel) return `チェックリスト項目の期限を${dueLabel}に変更しました。`;
-    return "チェックリスト項目の期限を更新しました。";
-  }
-  if ("assigneeId" in metadata) return "チェックリスト項目の担当者を変更しました。";
-  if ("content" in metadata) return "チェックリスト項目の内容を変更しました。";
-  return "チェックリスト項目を更新しました。";
-}
-function formatActivityMessage(action: string, metadata: Record<string, unknown>, lists: BoardList[]): string {
-  if (action === "card_updated") return formatCardUpdatedMessage(metadata, lists);
-  if (action === "card_created") return "このカードを作成しました。";
-  if (action === "card_moved") {
-    const toListName = getListNameById(lists, metadata.toListId);
-    if (toListName) return `このカードを「${toListName}」に移動しました。`;
-    return "このカードを移動しました。";
-  }
-  if (action === "card_archived") return "このカードをアーカイブしました。";
-  if (action === "card_unarchived") return "このカードをアーカイブから戻しました。";
-  if (action === "card_completed") return "このカードを完了にしました。";
-  if (action === "card_reopened") return "このカードを未完了に戻しました。";
-  if (action === "card_watching_started") return "このカードのウォッチを開始しました。";
-  if (action === "card_watching_stopped") return "このカードのウォッチを解除しました。";
-  if (action === "checklist_created") return "チェックリストを追加しました。";
-  if (action === "checklist_item_created") return "チェックリスト項目を追加しました。";
-  if (action === "checklist_item_updated") return formatChecklistItemUpdatedMessage(metadata);
-  if (action === "checklist_item_deleted") return "チェックリスト項目を削除しました。";
-  if (action === "card_custom_fields_updated") return "カスタムフィールドを更新しました。";
-  if (action === "attachment_added") {
-    if (typeof metadata.name === "string" && metadata.name) {
-      return `添付ファイル「${metadata.name}」を追加しました。`;
-    }
-    return "添付ファイルを追加しました。";
-  }
-  if (action === "comment_created") return "コメントを追加しました。";
-  return action;
 }
 type CustomFieldDraft = {
   valueText?: string;
@@ -304,13 +202,13 @@ export function CardDetailDrawer({
   checklists,
   checklistItems,
   attachments,
-  activities,
   detailLoading = false,
   onClose,
   onCardPatched,
   onCommentCreated,
   onChecklistCreated,
   onChecklistDeleted,
+  onChecklistItemDeleted,
   onChecklistItemCreated,
   onChecklistItemPatched,
   onAttachmentCreated,
@@ -327,9 +225,6 @@ export function CardDetailDrawer({
   const [startAt, setStartAt] = useState(toDateTimeInputValue(card.start_at));
   const [dueAt, setDueAt] = useState(toDateTimeInputValue(card.due_at));
   const [coverColor, setCoverColor] = useState(card.cover_value ?? card.cover_color ?? "#2b6cb0");
-  const [locationName, setLocationName] = useState(card.location_name ?? "");
-  const [locationLat, setLocationLat] = useState(card.location_lat?.toString() ?? "");
-  const [locationLng, setLocationLng] = useState(card.location_lng?.toString() ?? "");
   const incomingAssigneeIds = useMemo(() => getAssigneeIdsForCard(cardAssignees, card.id), [cardAssignees, card.id]);
   const incomingLabelIds = useMemo(() => getLabelIdsForCard(cardLabels, card.id), [cardLabels, card.id]);
   const [assigneeIds, setAssigneeIds] = useState(incomingAssigneeIds);
@@ -346,7 +241,13 @@ export function CardDetailDrawer({
   const [pendingChecklistCreateByChecklistId, setPendingChecklistCreateByChecklistId] = useState<
     Record<string, boolean>
   >({});
+  const [pendingChecklistDeleteByChecklistId, setPendingChecklistDeleteByChecklistId] = useState<
+    Record<string, boolean>
+  >({});
   const [pendingChecklistPatchByItemId, setPendingChecklistPatchByItemId] = useState<
+    Record<string, boolean>
+  >({});
+  const [pendingChecklistDeleteByItemId, setPendingChecklistDeleteByItemId] = useState<
     Record<string, boolean>
   >({});
   const [showCardActions, setShowCardActions] = useState(false);
@@ -374,26 +275,20 @@ export function CardDetailDrawer({
   const cardComments = useMemo(() => comments.filter(c => c.card_id === card.id), [comments, card.id]);
   const cardChecklists = useMemo(() => checklists.filter(c => c.card_id === card.id).sort((a, b) => a.position - b.position), [checklists, card.id]);
   const cardAttachments = useMemo(() => attachments.filter(a => a.card_id === card.id), [attachments, card.id]);
-  const cardActivities = useMemo(() => activities.filter(a => a.card_id === card.id), [activities, card.id]);
   const isWatching = currentUserId ? cardWatchers.includes(currentUserId) : false;
   const isPastDue = card.due_at ? new Date(card.due_at) < new Date() : false;
   const hasCoverBand = card.cover_type === "color" && Boolean(card.cover_value);
-  const activityFeed = useMemo(() => {
-    const items = [...cardComments.map(c => ({
-      id: c.id,
-      type: "comment" as const,
-      content: c.content,
-      created_at: c.created_at,
-      user_id: c.user_id
-    })), ...cardActivities.map(a => ({
-      id: a.id,
-      type: "activity" as const,
-      content: formatActivityMessage(a.action, a.metadata ?? {}, lists),
-      created_at: a.created_at,
-      user_id: a.actor_id
-    }))];
+  const commentFeed = useMemo(() => {
+    const items = [
+      ...cardComments.map(c => ({
+        id: c.id,
+        content: c.content,
+        created_at: c.created_at,
+        user_id: c.user_id
+      }))
+    ];
     return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [cardComments, cardActivities, lists]);
+  }, [card.id, cardComments]);
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -438,12 +333,7 @@ export function CardDetailDrawer({
   useEffect(() => {
     setCoverColor(card.cover_value ?? card.cover_color ?? "#2b6cb0");
   }, [card.cover_color, card.cover_value]);
-  useEffect(() => {
-    if (activePanel === "location") return;
-    setLocationName(card.location_name ?? "");
-    setLocationLat(card.location_lat?.toString() ?? "");
-    setLocationLng(card.location_lng?.toString() ?? "");
-  }, [activePanel, card.location_lat, card.location_lng, card.location_name]);
+
   useEffect(() => {
     if (activePanel === "members") return;
     setAssigneeIds(incomingAssigneeIds);
@@ -617,21 +507,7 @@ export function CardDetailDrawer({
       setDueAt(toDateTimeInputValue(card.due_at));
     }
   }
-  async function saveLocation() {
-    try {
-      const updated = await patchFields({
-        locationName: locationName.trim() || null,
-        locationLat: locationLat ? Number(locationLat) : null,
-        locationLng: locationLng ? Number(locationLng) : null
-      });
-      onCardPatched(updated);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save location.");
-      setLocationName(card.location_name ?? "");
-      setLocationLat(card.location_lat?.toString() ?? "");
-      setLocationLng(card.location_lng?.toString() ?? "");
-    }
-  }
+
   async function saveCustomFields() {
     if (!customFields.length) return;
     const values = customFields.map(field => {
@@ -778,6 +654,33 @@ export function CardDetailDrawer({
     setNewChecklistTitle("");
     setActivePanel(null);
   }
+  async function deleteChecklist(checklist: Checklist) {
+    if (pendingChecklistDeleteByChecklistId[checklist.id]) return;
+    const confirmed = window.confirm(`「${checklist.title}」を削除しますか？`);
+    if (!confirmed) return;
+
+    setPendingChecklistDeleteByChecklistId((current) => ({ ...current, [checklist.id]: true }));
+    const response = await fetch(`/api/checklists/${checklist.id}`, {
+      method: "DELETE",
+    });
+    const body = await response.json();
+    setPendingChecklistDeleteByChecklistId((current) => ({ ...current, [checklist.id]: false }));
+    if (!response.ok) {
+      setError(body?.error?.message ?? "Failed to delete checklist.");
+      return;
+    }
+
+    onChecklistDeleted?.(checklist.id);
+    closeChecklistPopover();
+    setChecklistItemDraft((current) => {
+      if (!(checklist.id in current)) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[checklist.id];
+      return next;
+    });
+  }
   function closeChecklistPopover() {
     setChecklistPopover(null);
     setChecklistMemberQuery("");
@@ -834,6 +737,25 @@ export function CardDetailDrawer({
     }
     onChecklistItemPatched(body.data);
     return body.data as ChecklistItem;
+  }
+  async function deleteChecklistItem(item: ChecklistItem) {
+    if (pendingChecklistDeleteByItemId[item.id]) return;
+    const confirmed = window.confirm(`「${item.content}」を削除しますか？`);
+    if (!confirmed) return;
+
+    setPendingChecklistDeleteByItemId((current) => ({ ...current, [item.id]: true }));
+    const response = await fetch(`/api/checklist-items/${item.id}`, {
+      method: "DELETE",
+    });
+    const body = await response.json();
+    setPendingChecklistDeleteByItemId((current) => ({ ...current, [item.id]: false }));
+    if (!response.ok) {
+      setError(body?.error?.message ?? "Failed to delete checklist item.");
+      return;
+    }
+
+    onChecklistItemDeleted?.(item.id);
+    closeChecklistPopover();
   }
   async function createChecklistItem(checklistId: string) {
     if (pendingChecklistCreateByChecklistId[checklistId]) return;
@@ -1057,7 +979,7 @@ export function CardDetailDrawer({
       }} /> : null}        {/* Close button */}        <div className="absolute top-3 right-12 z-20" ref={cardActionsRef}>          <button type="button" aria-label={"カードアクション"} aria-haspopup="menu" aria-expanded={showCardActions} onClick={() => setShowCardActions(prev => !prev)} className="w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none">            {"\u2026"}          </button>          {showCardActions ? <div role="menu" className="absolute right-0 mt-1 w-48 rounded-lg border border-[#d0d4db] bg-white p-1 shadow-xl">              <button type="button" role="menuitem" onClick={() => {
             setShowCardActions(false);
             void toggleArchive();
-          }} className="w-full rounded-md px-3 py-2 text-left text-sm text-[#172b4d] hover:bg-[#f1f2f4]">                {card.archived ? "アーカイブを解除" : "カードをアーカイブ"}              </button>            </div> : null}        </div>        <button type="button" onClick={onClose} aria-label={"\u9589\u3058\u308b"} className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none font-bold">          {"\u00d7"}        </button>        {/* Body: two columns */}        <div className={`flex gap-0 p-5 min-h-[480px] ${hasCoverBand ? "pt-4" : "pt-14"}`}>          {/* ===== MAIN COLUMN ===== */}          <div className="flex-1 min-w-0 pr-6 space-y-5">            {/* Title */}            <div className="flex items-start gap-3">              <div className="mt-3 text-[#44546f] shrink-0 text-base">📋</div>              <div className="flex-1 min-w-0">                {editingTitle ? <textarea className="w-full text-xl font-bold rounded-lg px-2 py-1.5 resize-none text-[#172b4d] leading-snug border-2 border-[#0c66e4] bg-white focus:outline-none" value={title} rows={2} onChange={e => setTitle(e.target.value)} onBlur={() => {
+          }} className="w-full rounded-md px-3 py-2 text-left text-sm text-[#172b4d] hover:bg-[#f1f2f4]">                {card.archived ? "アーカイブを解除" : "カードをアーカイブ"}              </button>            </div> : null}        </div>        <button type="button" onClick={onClose} aria-label={"\u9589\u3058\u308b"} className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full text-[#44546f] bg-[#f1f2f4] hover:bg-[#dfe1e6] text-xl leading-none font-bold">          {"\u00d7"}        </button>        {/* Body: two columns */}        <div className={`flex gap-0 p-5 min-h-[480px] ${hasCoverBand ? "pt-4" : "pt-14"}`}>          {/* ===== MAIN COLUMN ===== */}          <div className="flex-1 min-w-0 pr-6 space-y-5">            {/* Title */}            <div className="flex items-start gap-3">              <div className="mt-3 text-[#44546f] shrink-0"><LayoutGrid className="h-5 w-5" /></div>              <div className="flex-1 min-w-0">                {editingTitle ? <textarea className="w-full text-xl font-bold rounded-lg px-2 py-1.5 resize-none text-[#172b4d] leading-snug border-2 border-[#0c66e4] bg-white focus:outline-none" value={title} rows={2} onChange={e => setTitle(e.target.value)} onBlur={() => {
                 setEditingTitle(false);
                 void saveTitle();
               }} onKeyDown={e => {
@@ -1086,14 +1008,14 @@ export function CardDetailDrawer({
                   minute: "2-digit"
                 })}                      {isPastDue && !card.is_completed ? " (期限切れ)" : ""}                    </span>                  </div>}                <div>                    <p className="text-xs font-semibold text-[#44546f] uppercase tracking-wide mb-2">                      完了マーク                    </p>                    <button type="button" onClick={() => void toggleComplete()} className={`inline-flex items-center gap-1.5 rounded h-8 px-3 text-sm font-semibold transition-colors ${card.is_completed ? "bg-[#4bce97] text-white" : "bg-[#dfe1e6] text-[#172b4d] hover:bg-[#ced3da]"}`} aria-label={card.is_completed ? "未完了に戻す" : "完了としてマーク"}>                      <input type="checkbox" checked={card.is_completed} onChange={() => void toggleComplete()} className="accent-[#0c66e4] pointer-events-none" readOnly />                      <span>{card.is_completed ? "完了" : "未完了"}</span>                    </button>                  </div>              </div> : null}            {/* Action buttons row */}            <div className="relative pl-8 flex items-center gap-2 flex-wrap">              <button type="button" onClick={() => togglePanel("addMenu")} className="flex items-center gap-1.5 rounded-full bg-[#0c66e4] text-white px-4 py-1.5 text-sm font-medium hover:bg-[#0055cc] transition-colors">                + 追加              </button>              {([{
               key: "labels" as const,
-              label: "🏷ラベル"
+              label: "ラベル"
             }, {
               key: "checklist" as const,
-              label: "☑ チェックリスト"
+              label: "チェックリスト"
             }, {
               key: "members" as const,
-              label: "👤 メンバー"
-            }] as const).map(btn => <button key={btn.key} type="button" onClick={() => togglePanel(btn.key)} className={`flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${activePanel === btn.key ? "bg-[#dfe1e6] border-[#b3b9c4] text-[#172b4d]" : "bg-white border-[#d0d4db] text-[#172b4d] hover:bg-[#f7f8f9]"}`}>                  {btn.label}                </button>)}              {/* Add Menu Popup */}              {activePanel === "addMenu" && <>                  {/* Backdrop to close addMenu */}                  <div className="fixed inset-0 z-20" onClick={() => setActivePanel(null)} />                  <div className="absolute top-full left-0 mt-1 z-30 w-64 bg-white rounded-xl shadow-xl border border-[#d0d4db]">                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#dfe1e6]">                      <span className="text-sm font-semibold text-[#172b4d]">                        カードに追加                      </span>                      <button type="button" onClick={() => setActivePanel(null)} className="text-[#626f86] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none">                        ×                      </button>                    </div>                    <div className="p-1.5">                      {ADD_MENU_OPTIONS.map(opt => <button key={String(opt.key)} type="button" onClick={() => setActivePanel(opt.key)} className="w-full flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-[#f7f8f9] text-left">                          <span className="text-base mt-0.5 w-5 text-center shrink-0">                            {opt.icon}                          </span>                          <div>                            <div className="text-sm font-medium text-[#172b4d]">                              {opt.label}                            </div>                            <div className="text-xs text-[#626f86] mt-0.5">                              {opt.desc}                            </div>                          </div>                        </button>)}                    </div>                  </div>                </>}            </div>            {/* Inline action panel */}            {activePanel && activePanel !== "addMenu" && <div className="ml-8 rounded-xl bg-white border border-[#d0d4db] shadow-sm overflow-hidden">                <div className="flex items-center justify-between px-4 py-3 bg-[#f7f8f9] border-b border-[#dfe1e6]">                  <div className="w-6">                    {activePanel === "labels" && labelPanelMode === "create" ? <button type="button" onClick={() => setLabelPanelMode("list")} className="text-[#44546f] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none" aria-label={"\u30e9\u30d9\u30eb\u4e00\u89a7\u306b\u623b\u308b"}>                        {"\u2039"}                      </button> : null}                  </div>                  <span className="text-sm font-semibold text-[#172b4d]">                    {activePanel === "labels" && labelPanelMode === "create" ? "\u30e9\u30d9\u30eb\u3092\u4f5c\u6210" : PANEL_LABELS[activePanel] ?? ""}                  </span>                  <button type="button" onClick={() => setActivePanel(null)} className="text-[#626f86] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none" aria-label={"\u9589\u3058\u308b"}>                    {"\u00d7"}                  </button>                </div>                <div className="p-4">                  {/* Labels panel */}                  {activePanel === "labels" && labelPanelMode === "list" && <div className="space-y-3">                      <input type="search" value={labelQuery} onChange={event => setLabelQuery(event.target.value)} placeholder={"\u30e9\u30d9\u30eb\u3092\u691c\u7d22"} className="w-full rounded-md border border-[#0c66e4] bg-white px-3 py-2 text-sm text-[#172b4d] outline-none focus:ring-2 focus:ring-[#0c66e4]/20" />                      <p className="text-xs font-semibold text-[#44546f] uppercase tracking-wide">                        {"\u30e9\u30d9\u30eb"}                      </p>                      <div className="max-h-64 space-y-2 overflow-y-auto pr-1">                        {filteredLabels.length === 0 ? <p className="py-2 text-sm text-[#626f86]">                            {"\u30e9\u30d9\u30eb\u304c\u3042\u308a\u307e\u305b\u3093"}                          </p> : filteredLabels.map(label => <label key={label.id} className="flex items-center gap-3 rounded-md p-1.5 hover:bg-[#f1f2f4] cursor-pointer">                              <input type="checkbox" checked={labelIds.includes(label.id)} onChange={() => {
+              label: "メンバー"
+            }] as const).map(btn => <button key={btn.key} type="button" onClick={() => togglePanel(btn.key)} className={`flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${activePanel === btn.key ? "bg-[#dfe1e6] border-[#b3b9c4] text-[#172b4d]" : "bg-white border-[#d0d4db] text-[#172b4d] hover:bg-[#f7f8f9]"}`}>                  <span className="shrink-0">{btn.key === "labels" ? <Tag className="h-4 w-4" /> : btn.key === "checklist" ? <CheckSquare className="h-4 w-4" /> : <User className="h-4 w-4" />}</span>                  <span>{btn.label}</span>                </button>)}              {/* Add Menu Popup */}              {activePanel === "addMenu" && <>                  {/* Backdrop to close addMenu */}                  <div className="fixed inset-0 z-20" onClick={() => setActivePanel(null)} />                  <div className="absolute top-full left-0 mt-1 z-30 w-64 bg-white rounded-xl shadow-xl border border-[#d0d4db]">                    <div className="flex items-center justify-between px-4 py-3 border-b border-[#dfe1e6]">                      <span className="text-sm font-semibold text-[#172b4d]">                        カードに追加                      </span>                      <button type="button" onClick={() => setActivePanel(null)} className="text-[#626f86] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none">                        ×                      </button>                    </div>                    <div className="p-1.5">                      {ADD_MENU_OPTIONS.map(opt => <button key={String(opt.key)} type="button" onClick={() => setActivePanel(opt.key)} className="w-full flex items-start gap-3 rounded-lg px-3 py-2.5 hover:bg-[#f7f8f9] text-left">                          <span className="text-base mt-0.5 w-5 text-center shrink-0">                            {opt.icon}                          </span>                          <div>                            <div className="text-sm font-medium text-[#172b4d]">                              {opt.label}                            </div>                            <div className="text-xs text-[#626f86] mt-0.5">                              {opt.desc}                            </div>                          </div>                        </button>)}                    </div>                  </div>                </>}            </div>            {/* Inline action panel */}            {activePanel && activePanel !== "addMenu" && <div className="ml-8 rounded-xl bg-white border border-[#d0d4db] shadow-sm overflow-hidden">                <div className="flex items-center justify-between px-4 py-3 bg-[#f7f8f9] border-b border-[#dfe1e6]">                  <div className="w-6">                    {activePanel === "labels" && labelPanelMode === "create" ? <button type="button" onClick={() => setLabelPanelMode("list")} className="text-[#44546f] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none" aria-label={"\u30e9\u30d9\u30eb\u4e00\u89a7\u306b\u623b\u308b"}>                        {"\u2039"}                      </button> : null}                  </div>                  <span className="text-sm font-semibold text-[#172b4d]">                    {activePanel === "labels" && labelPanelMode === "create" ? "\u30e9\u30d9\u30eb\u3092\u4f5c\u6210" : PANEL_LABELS[activePanel] ?? ""}                  </span>                  <button type="button" onClick={() => setActivePanel(null)} className="text-[#626f86] hover:text-[#172b4d] w-6 h-6 flex items-center justify-center text-lg leading-none" aria-label={"\u9589\u3058\u308b"}>                    {"\u00d7"}                  </button>                </div>                <div className="p-4">                  {/* Labels panel */}                  {activePanel === "labels" && labelPanelMode === "list" && <div className="space-y-3">                      <input type="search" value={labelQuery} onChange={event => setLabelQuery(event.target.value)} placeholder={"\u30e9\u30d9\u30eb\u3092\u691c\u7d22"} className="w-full rounded-md border border-[#0c66e4] bg-white px-3 py-2 text-sm text-[#172b4d] outline-none focus:ring-2 focus:ring-[#0c66e4]/20" />                      <p className="text-xs font-semibold text-[#44546f] uppercase tracking-wide">                        {"\u30e9\u30d9\u30eb"}                      </p>                      <div className="max-h-64 space-y-2 overflow-y-auto pr-1">                        {filteredLabels.length === 0 ? <p className="py-2 text-sm text-[#626f86]">                            {"\u30e9\u30d9\u30eb\u304c\u3042\u308a\u307e\u305b\u3093"}                          </p> : filteredLabels.map(label => <label key={label.id} className="flex items-center gap-3 rounded-md p-1.5 hover:bg-[#f1f2f4] cursor-pointer">                              <input type="checkbox" checked={labelIds.includes(label.id)} onChange={() => {
                       const next = labelIds.includes(label.id) ? labelIds.filter(id => id !== label.id) : [...labelIds, label.id];
                       setLabelIds(next);
                       void saveLabels(next);
@@ -1148,10 +1070,7 @@ export function CardDetailDrawer({
                   const file = e.target.files?.[0];
                   if (file) void uploadAttachment(file);
                   e.currentTarget.value = "";
-                }} />                    </label>}                  {/* Location panel */}                  {activePanel === "location" && <div className="space-y-3">                      <div>                        <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                          場所の名前                        </label>                        <input className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={locationName} onChange={e => setLocationName(e.target.value)} placeholder="例: 東京オフィス" />                      </div>                      <div className="grid grid-cols-2 gap-3">                        <div>                          <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                            緯度                          </label>                          <input type="number" step="0.000001" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={locationLat} onChange={e => setLocationLat(e.target.value)} placeholder="35.6895" />                        </div>                        <div>                          <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wide block mb-1.5">                            経度                          </label>                          <input type="number" step="0.000001" className="w-full border border-[#d0d4db] rounded-lg px-3 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={locationLng} onChange={e => setLocationLng(e.target.value)} placeholder="139.6917" />                        </div>                      </div>                      {card.location_name && <p className="text-xs text-[#44546f]">                          現在: {card.location_name}                        </p>}                      <div className="flex gap-2">                        <button type="button" onClick={() => {
-                    void saveLocation();
-                    setActivePanel(null);
-                  }} className="bg-[#0c66e4] text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-[#0055cc]">                          保存                        </button>                        <button type="button" onClick={() => setActivePanel(null)} className="text-[#172b4d] hover:bg-[#dfe1e6] rounded-lg px-3 py-2 text-sm">                          キャンセル                        </button>                      </div>                    </div>}                  {/* Custom Fields panel */}                  {activePanel === "customFields" && <div className="space-y-3">                      {customFields.length === 0 && <p className="text-sm text-[#626f86]">                          カスタムフィールドがありません                        </p>}                      {customFields.map(field => {
+                }} />                    </label>}                  {/* Custom Fields panel */}                  {activePanel === "customFields" && <div className="space-y-3">                      {customFields.length === 0 && <p className="text-sm text-[#626f86]">                          カスタムフィールドがありません                        </p>}                      {customFields.map(field => {
                   const options = Array.isArray(field.options) ? field.options.map(item => typeof item === "string" ? {
                     id: item,
                     label: item
@@ -1202,7 +1121,8 @@ export function CardDetailDrawer({
             const pct = items.length ? Math.round(completedCount / items.length * 100) : 0;
             const draft = getChecklistDraft(checklistItemDraft, checklist.id);
             const isCreatingItem = Boolean(pendingChecklistCreateByChecklistId[checklist.id]);
-            return <div key={checklist.id} className="pl-8">                  <div className="mb-2 flex items-center gap-2">                    <span className="shrink-0 text-base text-[#44546f]">☑</span>                    <h3 className="flex-1 text-sm font-semibold text-[#172b4d]">                      {checklist.title}                    </h3>                  </div>                  <div className="mb-3 flex items-center gap-2">                    <span className={`w-8 shrink-0 text-right text-xs font-medium ${pct === 100 ? "text-[#1f845a]" : "text-[#44546f]"}`}>                      {pct}%                    </span>                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#dfe1e6]">                      <div className={`h-full rounded-full transition-all ${pct === 100 ? "bg-[#4bce97]" : "bg-[#0c66e4]"}`} style={{
+            const isDeletingChecklist = Boolean(pendingChecklistDeleteByChecklistId[checklist.id]);
+            return <div key={checklist.id} className="pl-8">                  <div className="mb-2 flex items-center gap-2">                    <CheckSquare className="h-4 w-4 shrink-0 text-[#44546f]" />                    <h3 className="flex-1 text-sm font-semibold text-[#172b4d]">                      {checklist.title}                    </h3>                    <button type="button" onClick={() => void deleteChecklist(checklist)} disabled={isDeletingChecklist} className="rounded-md px-2 py-1 text-xs text-[#c9372c] hover:bg-[#ffeceb] disabled:cursor-not-allowed disabled:opacity-60">                      {isDeletingChecklist ? "削除中..." : "削除"}                    </button>                  </div>                  <div className="mb-3 flex items-center gap-2">                    <span className={`w-8 shrink-0 text-right text-xs font-medium ${pct === 100 ? "text-[#1f845a]" : "text-[#44546f]"}`}>                      {pct}%                    </span>                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-[#dfe1e6]">                      <div className={`h-full rounded-full transition-all ${pct === 100 ? "bg-[#4bce97]" : "bg-[#0c66e4]"}`} style={{
                     width: `${pct}%`
                   }} />                    </div>                  </div>                  <div className="space-y-2">                    {items.map(item => {
                     const assignee = members.find(member => member.user_id === item.assignee_id) ?? null;
@@ -1210,12 +1130,14 @@ export function CardDetailDrawer({
                     const hasDueDate = Boolean(item.due_at);
                     const isOverdue = Boolean(item.due_at) && !item.is_completed && new Date(item.due_at as string) < new Date();
                     const isPatchingItem = Boolean(pendingChecklistPatchByItemId[item.id]);
-                    return <div key={item.id} className="rounded-lg px-2 py-2 hover:bg-[#e9ecf0]">                          <div className="flex items-start gap-3">                            <input type="checkbox" checked={item.is_completed} disabled={isPatchingItem} onChange={() => void toggleChecklistItem(item)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#d0d4db] accent-[#0c66e4]" />                            <span className={`flex-1 text-sm ${item.is_completed ? "line-through text-[#626f86]" : "text-[#172b4d]"}`}>                              {item.content}                            </span>                          </div>                          <div className="relative ml-7 mt-2 flex flex-wrap items-center gap-2">                            <button type="button" onClick={() => openChecklistItemAssigneePopover(checklist.id, item.id)} disabled={isPatchingItem} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${assigneeName ? "border-[#cce0ff] bg-[#deebff] text-[#0c66e4]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"} ${isPatchingItem ? "cursor-not-allowed opacity-60" : ""}`}>                              {assigneeName ? `👤 ${assigneeName}` : "👤 割り当て"}                            </button>                            <button type="button" onClick={() => openChecklistItemDuePopover(checklist.id, item)} disabled={isPatchingItem} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${hasDueDate ? isOverdue ? "border-[#ffd2d2] bg-[#ffeceb] text-[#c9372c]" : "border-[#d0d4db] bg-[#f1f2f4] text-[#172b4d]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"} ${isPatchingItem ? "cursor-not-allowed opacity-60" : ""}`}>                              {hasDueDate ? `🕒 ${formatDueDateLabel(item.due_at as string)}` : "🕒 期限"}                            </button>                            {checklistPopover?.type === "item-assignee" && checklistPopover.checklistId === checklist.id && checklistPopover.itemId === item.id ? renderChecklistAssigneePopover({
+                    const isDeletingItem = Boolean(pendingChecklistDeleteByItemId[item.id]);
+                    const isMutatingItem = isPatchingItem || isDeletingItem;
+                    return <div key={item.id} className="rounded-lg px-2 py-2 hover:bg-[#e9ecf0]">                          <div className="flex items-start gap-3">                            <input type="checkbox" checked={item.is_completed} disabled={isMutatingItem} onChange={() => void toggleChecklistItem(item)} className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#d0d4db] accent-[#0c66e4]" />                            <span className={`flex-1 text-sm ${item.is_completed ? "line-through text-[#626f86]" : "text-[#172b4d]"}`}>                              {item.content}                            </span>                          </div>                          <div className="relative ml-7 mt-2 flex flex-wrap items-center gap-2">                            <button type="button" onClick={() => openChecklistItemAssigneePopover(checklist.id, item.id)} disabled={isMutatingItem} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${assigneeName ? "border-[#cce0ff] bg-[#deebff] text-[#0c66e4]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"} ${isMutatingItem ? "cursor-not-allowed opacity-60" : ""}`}>                              {assigneeName ? `担当: ${assigneeName}` : "割り当て"}                            </button>                            <button type="button" onClick={() => openChecklistItemDuePopover(checklist.id, item)} disabled={isMutatingItem} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${hasDueDate ? isOverdue ? "border-[#ffd2d2] bg-[#ffeceb] text-[#c9372c]" : "border-[#d0d4db] bg-[#f1f2f4] text-[#172b4d]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"} ${isMutatingItem ? "cursor-not-allowed opacity-60" : ""}`}>                              {hasDueDate ? `期限: ${formatDueDateLabel(item.due_at as string)}` : "期限"}                            </button>                            <button type="button" onClick={() => void deleteChecklistItem(item)} disabled={isMutatingItem} className="rounded-md px-2 py-1 text-xs font-medium text-[#c9372c] hover:bg-[#ffeceb] disabled:cursor-not-allowed disabled:opacity-60">                              {isDeletingItem ? "削除中..." : "削除"}                            </button>                            {checklistPopover?.type === "item-assignee" && checklistPopover.checklistId === checklist.id && checklistPopover.itemId === item.id ? renderChecklistAssigneePopover({
                         selectedAssigneeId: item.assignee_id,
                         onSelect: assigneeId => {
                           void saveChecklistItemAssignee(item, assigneeId);
                         },
-                        disabled: isPatchingItem
+                        disabled: isMutatingItem
                       }) : null}                            {checklistPopover?.type === "item-due" && checklistPopover.checklistId === checklist.id && checklistPopover.itemId === item.id ? renderChecklistDuePopover({
                         onSave: dueDate => {
                           void saveChecklistItemDueDate(item, dueDate);
@@ -1223,7 +1145,7 @@ export function CardDetailDrawer({
                         onDelete: item.due_at ? () => {
                           void saveChecklistItemDueDate(item, null);
                         } : undefined,
-                        disabled: isPatchingItem
+                        disabled: isMutatingItem
                       }) : null}                          </div>                        </div>;
                   })}                  </div>                  <div className="mt-3 rounded-lg border border-[#d0d4db] bg-white p-3">                    <input className="w-full rounded-md border border-[#d0d4db] px-3 py-2 text-sm text-[#172b4d] focus:border-[#0c66e4] focus:outline-none" value={draft.content} onChange={event => updateChecklistDraft(checklist.id, {
                     content: event.target.value
@@ -1232,14 +1154,14 @@ export function CardDetailDrawer({
                       event.preventDefault();
                       void createChecklistItem(checklist.id);
                     }
-                  }} />                    <div className="relative mt-2 flex flex-wrap items-center gap-2">                      <button type="button" onClick={() => void createChecklistItem(checklist.id)} disabled={isCreatingItem || !draft.content.trim()} className="rounded-md bg-[#0c66e4] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">                        {isCreatingItem ? "追加中..." : "追加"}                      </button>                      <button type="button" onClick={() => {
+                  }} />                    <div className="relative mt-2 flex flex-wrap items-center gap-2">                      <button type="button" onClick={() => void createChecklistItem(checklist.id)} disabled={isDeletingChecklist || isCreatingItem || !draft.content.trim()} className="rounded-md bg-[#0c66e4] px-4 py-1.5 text-sm font-medium text-white hover:bg-[#0055cc] disabled:cursor-not-allowed disabled:opacity-60">                        {isCreatingItem ? "追加中..." : "追加"}                      </button>                      <button type="button" onClick={() => {
                     clearChecklistDraft(checklist.id);
                     closeChecklistPopover();
                   }} className="rounded-md px-3 py-1.5 text-sm text-[#172b4d] hover:bg-[#dfe1e6]">                        キャンセル                      </button>                      <button type="button" onClick={() => openChecklistDraftAssigneePopover(checklist.id)} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${draft.assigneeId ? "border-[#cce0ff] bg-[#deebff] text-[#0c66e4]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"}`}>                        {draft.assigneeId ? (() => {
                       const selected = members.find(member => member.user_id === draft.assigneeId);
                       const selectedName = selected ? getMemberDisplayName(selected) : draft.assigneeId;
-                      return `👤 ${selectedName}`;
-                    })() : "👤 割り当て"}                      </button>                      <button type="button" onClick={() => openChecklistDraftDuePopover(checklist.id)} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${draft.dueDate ? "border-[#d0d4db] bg-[#f1f2f4] text-[#172b4d]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"}`}>                        {draft.dueDate ? `🕒 ${draft.dueDate.replace(/-/g, "/")}` : "🕒 期限"}                      </button>                      {checklistPopover?.type === "draft-assignee" && checklistPopover.checklistId === checklist.id ? renderChecklistAssigneePopover({
+                      return `担当: ${selectedName}`;
+                    })() : "割り当て"}                      </button>                      <button type="button" onClick={() => openChecklistDraftDuePopover(checklist.id)} className={`rounded-full border px-2 py-1 text-xs font-medium transition-colors ${draft.dueDate ? "border-[#d0d4db] bg-[#f1f2f4] text-[#172b4d]" : "border-[#d0d4db] bg-white text-[#44546f] hover:bg-[#f7f8f9]"}`}>                        {draft.dueDate ? `期限: ${draft.dueDate.replace(/-/g, "/")}` : "期限"}                      </button>                      {checklistPopover?.type === "draft-assignee" && checklistPopover.checklistId === checklist.id ? renderChecklistAssigneePopover({
                     selectedAssigneeId: draft.assigneeId,
                     onSelect: assigneeId => {
                       updateChecklistDraft(checklist.id, { assigneeId });
@@ -1255,20 +1177,14 @@ export function CardDetailDrawer({
                       closeChecklistPopover();
                     } : undefined
                   }) : null}                    </div>                  </div>                </div>;
-          })}            {/* Attachments */}            {cardAttachments.length > 0 && <div className="pl-8">                <div className="flex items-center gap-2 mb-3">                  <span className="text-[#44546f] shrink-0">📎</span>                  <h3 className="text-sm font-semibold text-[#172b4d]">添付ファイル</h3>                </div>                <div className="space-y-2">                  {cardAttachments.map(attachment => <button key={attachment.id} type="button" onClick={() => void openAttachment(attachment.id)} className="w-full flex items-center gap-3 rounded-lg border border-[#d0d4db] bg-white p-2.5 text-left hover:bg-[#f7f8f9] transition-colors">                      <div className="w-16 h-12 rounded-md bg-[#dfe1e6] flex items-center justify-center text-xs font-bold text-[#626f86] shrink-0">                        {attachment.mime_type.startsWith("image/") ? "IMG" : "FILE"}                      </div>                      <div>                        <p className="text-sm font-semibold text-[#172b4d]">                          {attachment.name}                        </p>                        <p className="text-xs text-[#626f86] mt-0.5">                          {new Date(attachment.created_at).toLocaleDateString("ja-JP")} ·{" "}                          {(attachment.size_bytes / 1024).toFixed(1)} KB                        </p>                      </div>                    </button>)}                </div>              </div>}          </div>          {/* ===== RIGHT SIDEBAR ===== */}          <div className="w-[220px] shrink-0 space-y-5">            {/* コメントとアクティビティ */}            <div>              <div className="flex items-center justify-between mb-3">                <h3 className="text-sm font-semibold text-[#172b4d]">                  コメントとアクティビティ                </h3>                <button type="button" onClick={() => setShowSidebarDetails(prev => !prev)} className="text-xs border border-[#d0d4db] rounded px-2 py-1 bg-white text-[#44546f] hover:bg-[#f7f8f9]">                  {showSidebarDetails ? "詳細を非表示" : "詳細を表示"}                </button>              </div>              {showSidebarDetails ? <>                  {/* Comment input */}                  <form onSubmit={createComment} className="mb-4">                    <textarea className="w-full border border-[#d0d4db] rounded-lg px-3 py-2.5 text-sm bg-white text-[#172b4d] resize-none focus:outline-none focus:border-[#0c66e4] transition-colors" value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="コメントを入力してください" rows={commentText ? 3 : 2} />                    {commentText && <button type="submit" className="mt-1.5 bg-[#0c66e4] text-white rounded-md px-4 py-1.5 text-sm font-medium hover:bg-[#0055cc]">                        保存                      </button>}                  </form>                  {/* Activity feed */}                  <div className="space-y-4 max-h-96 overflow-y-auto pr-1">                    {activityFeed.length === 0 && <p className="text-xs text-[#626f86]">アクティビティはまだありません</p>}                    {activityFeed.map(({
-                  id,
-                  type,
-                  content,
-                  created_at,
-                  user_id
-                }) => {
+          })}            {/* Attachments */}            {cardAttachments.length > 0 && <div className="pl-8">                <div className="flex items-center gap-2 mb-3">                  <Paperclip className="h-4 w-4 text-[#44546f] shrink-0" />                  <h3 className="text-sm font-semibold text-[#172b4d]">添付ファイル</h3>                </div>                <div className="space-y-2">                  {cardAttachments.map(attachment => <button key={attachment.id} type="button" onClick={() => void openAttachment(attachment.id)} className="w-full flex items-center gap-3 rounded-lg border border-[#d0d4db] bg-white p-2.5 text-left hover:bg-[#f7f8f9] transition-colors">                      <div className="w-16 h-12 rounded-md bg-[#dfe1e6] flex items-center justify-center text-xs font-bold text-[#626f86] shrink-0">                        {attachment.mime_type.startsWith("image/") ? "IMG" : "FILE"}                      </div>                      <div>                        <p className="text-sm font-semibold text-[#172b4d]">                          {attachment.name}                        </p>                        <p className="text-xs text-[#626f86] mt-0.5">                          {new Date(attachment.created_at).toLocaleDateString("ja-JP")} ・{" "}                          {(attachment.size_bytes / 1024).toFixed(1)} KB                        </p>                      </div>                    </button>)}                </div>              </div>}          </div>          {/* ===== RIGHT SIDEBAR ===== */}          <div className="w-[220px] shrink-0 space-y-5">            {/* コメント */}            <div>              <div className="flex items-center justify-between mb-3">                <h3 className="text-sm font-semibold text-[#172b4d]">                  コメント                </h3>                <button type="button" onClick={() => setShowSidebarDetails(prev => !prev)} className="text-xs border border-[#d0d4db] rounded px-2 py-1 bg-white text-[#44546f] hover:bg-[#f7f8f9]">                  {showSidebarDetails ? "詳細を非表示" : "詳細を表示"}                </button>              </div>              {showSidebarDetails ? <>                  {/* Comment input */}                  <form onSubmit={createComment} className="mb-4">                    <textarea className="w-full border border-[#d0d4db] rounded-lg px-3 py-2.5 text-sm bg-white text-[#172b4d] resize-none focus:outline-none focus:border-[#0c66e4] transition-colors" value={commentText} onChange={e => setCommentText(e.target.value)} placeholder="コメントを入力してください" rows={commentText ? 3 : 2} />                    {commentText && <button type="submit" className="mt-1.5 bg-[#0c66e4] text-white rounded-md px-4 py-1.5 text-sm font-medium hover:bg-[#0055cc]">                        保存                      </button>}                  </form>                  {/* Comment feed */}                  <div className="space-y-4 max-h-96 overflow-y-auto pr-1">                    {commentFeed.length === 0 && <p className="text-xs text-[#626f86]">コメントはまだありません</p>}                    {commentFeed.map(({ id, content, created_at, user_id }) => {
                   const member = members.find(m => m.user_id === user_id);
                   const name = member?.profile?.display_name ?? member?.profile?.email ?? "ユーザー";
                   const avatarColor = getMemberAvatarColor(member);
-                  return <div key={`${type}-${id}`} className="flex gap-2.5">                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{
+                  return <div key={id} className="flex gap-2.5">                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{
                     backgroundColor: avatarColor
-                  }}>                            {name.charAt(0).toUpperCase()}                          </div>                          <div className="flex-1 min-w-0">                            <p className="text-sm text-[#172b4d] leading-snug break-words">                              <span className="font-bold">{name}</span>                              {type === "activity" ? "さんが " : " "}                              {content}                            </p>                            <p className="text-xs text-[#626f86] mt-0.5">                              {formatRelativeTime(created_at)}                            </p>                          </div>                        </div>;
-                })}                  </div>                </> : <p className="text-xs text-[#626f86]">コメントとアクティビティを非表示にしています</p>}            </div>            {/* カードに追加 */}            <div className="hidden">              <h4 className="text-xs font-semibold text-[#44546f] uppercase tracking-wider mb-2">                カードに追加              </h4>              {ADD_MENU_OPTIONS.map(btn => <button key={String(btn.key)} type="button" onClick={() => togglePanel(btn.key)} className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left mb-1 transition-colors ${activePanel === btn.key ? "bg-[#dfe1e6] text-[#172b4d] font-medium" : "bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d]"}`}>                  <span className="shrink-0">{btn.icon}</span>                  {btn.label}                </button>)}            </div>            {/* アクション */}            <div className="hidden">              <h4 className="text-xs font-semibold text-[#44546f] uppercase tracking-wider mb-2">                アクション              </h4>              <button type="button" onClick={() => void toggleWatch()} className="w-full flex items-center gap-2 bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d] px-3 py-2 text-sm rounded-md mb-1 transition-colors">                <span>👁</span>                {isWatching ? "ウォッチを解除" : "ウォッチ"}              </button>              <button type="button" onClick={() => void toggleComplete()} className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md mb-1 transition-colors ${card.is_completed ? "bg-[#4bce97]/20 hover:bg-[#4bce97]/30 text-[#1f845a]" : "bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d]"}`}>                <span>?</span>                {card.is_completed ? "未完了にする" : "完了にする"}              </button>              <button type="button" onClick={() => void toggleArchive()} className="w-full flex items-center gap-2 bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d] px-3 py-2 text-sm rounded-md mb-1 transition-colors">                <span>📦</span>                {card.archived ? "アーカイブを解除" : "アーカイブ"}              </button>              {/* List mover */}              <div className="mt-3">                <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wider block mb-1.5">                  リストに移動                </label>                <select className="w-full border border-[#d0d4db] rounded-lg px-2 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={listId} onChange={e => {
+                  }}>                            {name.charAt(0).toUpperCase()}                          </div>                          <div className="flex-1 min-w-0">                            <p className="text-sm text-[#172b4d] leading-snug break-words">                              <span className="font-bold">{name}</span>                                                             {content}                            </p>                            <p className="text-xs text-[#626f86] mt-0.5">                              {formatRelativeTime(created_at)}                            </p>                          </div>                        </div>;
+                })}                  </div>                </> : <p className="text-xs text-[#626f86]">コメントを非表示にしています</p>}            </div>            {/* カードに追加 */}            <div className="hidden">              <h4 className="text-xs font-semibold text-[#44546f] uppercase tracking-wider mb-2">                カードに追加              </h4>              {ADD_MENU_OPTIONS.map(btn => <button key={String(btn.key)} type="button" onClick={() => togglePanel(btn.key)} className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm text-left mb-1 transition-colors ${activePanel === btn.key ? "bg-[#dfe1e6] text-[#172b4d] font-medium" : "bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d]"}`}>                  <span className="shrink-0">{btn.icon}</span>                  {btn.label}                </button>)}            </div>            {/* アクション */}            <div className="hidden">              <h4 className="text-xs font-semibold text-[#44546f] uppercase tracking-wider mb-2">                アクション              </h4>              <button type="button" onClick={() => void toggleWatch()} className="w-full flex items-center gap-2 bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d] px-3 py-2 text-sm rounded-md mb-1 transition-colors">                <Eye className="h-4 w-4 shrink-0" />                {isWatching ? "ウォッチを解除" : "ウォッチ"}              </button>              <button type="button" onClick={() => void toggleComplete()} className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md mb-1 transition-colors ${card.is_completed ? "bg-[#4bce97]/20 hover:bg-[#4bce97]/30 text-[#1f845a]" : "bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d]"}`}>                <CheckSquare className="h-4 w-4 shrink-0" />                {card.is_completed ? "未完了にする" : "完了にする"}              </button>              <button type="button" onClick={() => void toggleArchive()} className="w-full flex items-center gap-2 bg-[#e9ecf0] hover:bg-[#dfe1e6] text-[#172b4d] px-3 py-2 text-sm rounded-md mb-1 transition-colors">                <Archive className="h-4 w-4 shrink-0" />                {card.archived ? "アーカイブを解除" : "アーカイブ"}              </button>              {/* List mover */}              <div className="mt-3">                <label className="text-xs font-semibold text-[#44546f] uppercase tracking-wider block mb-1.5">                  リストに移動                </label>                <select className="w-full border border-[#d0d4db] rounded-lg px-2 py-2 text-sm bg-white text-[#172b4d] focus:outline-none focus:border-[#0c66e4]" value={listId} onChange={e => {
                 const nextListId = e.target.value;
                 setListId(nextListId);
                 void patchFields({
@@ -1276,3 +1192,10 @@ export function CardDetailDrawer({
                 }).then(onCardPatched);
               }}>                  {lists.map(list => <option key={list.id} value={list.id}>                      {list.name}                    </option>)}                </select>              </div>            </div>          </div>        </div>        {/* Error banner */}        {error && <div className="mx-5 mb-4 rounded-lg bg-[#ffeceb] border border-[#ffd2d2] text-[#c9372c] px-4 py-3 text-sm flex items-center justify-between">            <span>{error}</span>            <button type="button" onClick={() => setError(null)} className="ml-2 font-bold text-base leading-none">              ×            </button>          </div>}      </div>    </div>;
 }
+
+
+
+
+
+
+

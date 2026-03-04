@@ -36,19 +36,3 @@ export function buildCardPatchExecutionPlan(
     shouldResolveWorkspace,
   };
 }
-
-export function buildCardUpdatedActivityMetadata(
-  payload: Record<string, unknown>,
-  plan: Pick<CardPatchExecutionPlan, "shouldUpdateAssignees" | "shouldUpdateLabels">,
-): Record<string, unknown> {
-  const metadata = { ...payload };
-
-  if (!plan.shouldUpdateAssignees) {
-    delete metadata.assigneeIds;
-  }
-  if (!plan.shouldUpdateLabels) {
-    delete metadata.labelIds;
-  }
-
-  return metadata;
-}

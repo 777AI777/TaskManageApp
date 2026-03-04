@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole, assertWorkspaceRole } from "@/lib/permissions";
 import { ensurePosition } from "@/lib/utils";
@@ -68,17 +67,7 @@ export async function POST(
       throw new ApiError(500, "inbox_move_update_failed", itemUpdateError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: payload.boardId,
-      cardId: card.id,
-      actorId: user.id,
-      action: "inbox_item_moved_to_board",
-      metadata: {
-        inboxItemId: id,
-        listId: payload.listId,
-      },
-    });
-
+    
     return ok({ card, inboxItem: movedItem }, { status: 201 });
   } catch (error) {
     return fail(error as Error);

@@ -206,7 +206,6 @@ export async function runAutomationForEvent(
   });
 
   for (const rule of scopedRules) {
-    const runStart = new Date().toISOString();
     try {
       const matched = (conditionMap.get(rule.id) ?? []).every((condition) =>
         evaluateCondition(event, condition),
@@ -218,27 +217,8 @@ export async function runAutomationForEvent(
       for (const action of actionMap.get(rule.id) ?? []) {
         await executeAction(supabase, event, action);
       }
-
-      await supabase.from("automation_runs").insert({
-        rule_id: rule.id,
-        trigger_source: event.trigger,
-        status: "success",
-        details: { cardId: event.card.id },
-        started_at: runStart,
-        finished_at: new Date().toISOString(),
-      });
-    } catch (error) {
-      await supabase.from("automation_runs").insert({
-        rule_id: rule.id,
-        trigger_source: event.trigger,
-        status: "failed",
-        details: {
-          cardId: event.card.id,
-          message: error instanceof Error ? error.message : "unknown error",
-        },
-        started_at: runStart,
-        finished_at: new Date().toISOString(),
-      });
+    } catch {
+      continue;
     }
   }
 }

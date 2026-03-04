@@ -71,13 +71,6 @@ type PublicAttachment = {
   created_at: string;
 };
 
-type PublicActivity = {
-  id: string;
-  card_id: string | null;
-  action: string;
-  created_at: string;
-};
-
 type PublicCustomField = {
   id: string;
   name: string;
@@ -107,7 +100,6 @@ type Props = {
   checklists: PublicChecklist[];
   checklistItems: PublicChecklistItem[];
   attachments: PublicAttachment[];
-  activities: PublicActivity[];
   customFields: PublicCustomField[];
   cardCustomFieldValues: PublicCardCustomFieldValue[];
 };
@@ -141,7 +133,6 @@ export function PublicBoardClient({
   checklists,
   checklistItems,
   attachments,
-  activities,
   customFields,
   cardCustomFieldValues,
 }: Props) {
@@ -178,9 +169,6 @@ export function PublicBoardClient({
     : [];
   const selectedAttachments = selectedCard
     ? attachments.filter((attachment) => attachment.card_id === selectedCard.id)
-    : [];
-  const selectedActivities = selectedCard
-    ? activities.filter((activity) => activity.card_id === selectedCard.id).slice(0, 20)
     : [];
   const selectedCustomValues = selectedCard
     ? cardCustomFieldValues.filter((value) => value.card_id === selectedCard.id)
@@ -354,19 +342,6 @@ export function PublicBoardClient({
                       </div>
                     ))}
                     {!selectedAttachments.length ? <p className="text-sm text-slate-400">-</p> : null}
-                  </div>
-                </div>
-
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-slate-400">{"\u30a2\u30af\u30c6\u30a3\u30d3\u30c6\u30a3"}</p>
-                  <div className="mt-1 space-y-1">
-                    {selectedActivities.map((activity) => (
-                      <div key={activity.id} className="rounded border border-slate-700 bg-slate-800 p-2 text-sm">
-                        <p>{activity.action}</p>
-                        <p className="text-xs text-slate-400">{new Date(activity.created_at).toLocaleString("ja-JP")}</p>
-                      </div>
-                    ))}
-                    {!selectedActivities.length ? <p className="text-sm text-slate-400">-</p> : null}
                   </div>
                 </div>
               </section>

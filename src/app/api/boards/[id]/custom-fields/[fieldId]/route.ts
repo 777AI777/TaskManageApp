@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { customFieldPatchSchema } from "@/lib/validation/schemas";
@@ -61,16 +60,7 @@ export async function PATCH(
       throw new ApiError(500, "custom_field_update_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId,
-      actorId: user.id,
-      action: "custom_field_updated",
-      metadata: {
-        customFieldId: fieldId,
-        patch: payload,
-      },
-    });
-
+    
     return ok(data);
   } catch (error) {
     return fail(error as Error);
@@ -96,16 +86,7 @@ export async function DELETE(
       throw new ApiError(500, "custom_field_delete_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId,
-      actorId: user.id,
-      action: "custom_field_deleted",
-      metadata: {
-        customFieldId: fieldId,
-        name: existing.name,
-      },
-    });
-
+    
     return ok({ id: fieldId, deleted: true });
   } catch (error) {
     return fail(error as Error);

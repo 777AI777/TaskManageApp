@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 
@@ -47,13 +46,7 @@ export async function POST(
       throw new ApiError(500, "list_archive_failed", updateError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: list.board_id,
-      actorId: user.id,
-      action: payload.archived ? "list_archived" : "list_unarchived",
-      metadata: { listId: id, archived: payload.archived },
-    });
-
+    
     return ok(updatedList);
   } catch (error) {
     return fail(error as Error);

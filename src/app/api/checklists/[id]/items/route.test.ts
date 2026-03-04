@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
   parseBody: vi.fn(),
   requireApiUser: vi.fn(),
   assertBoardRole: vi.fn(),
-  logActivity: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -17,10 +16,6 @@ vi.mock("@/lib/auth", () => ({
 
 vi.mock("@/lib/permissions", () => ({
   assertBoardRole: mocks.assertBoardRole,
-}));
-
-vi.mock("@/lib/activity", () => ({
-  logActivity: mocks.logActivity,
 }));
 
 import { POST } from "./route";
@@ -117,9 +112,7 @@ describe("POST /api/checklists/[id]/items", () => {
     mocks.parseBody.mockReset();
     mocks.requireApiUser.mockReset();
     mocks.assertBoardRole.mockReset();
-    mocks.logActivity.mockReset();
     mocks.assertBoardRole.mockResolvedValue(undefined);
-    mocks.logActivity.mockResolvedValue(undefined);
   });
 
   it("creates checklist item with assignee_id and due_at", async () => {
@@ -171,4 +164,3 @@ describe("POST /api/checklists/[id]/items", () => {
     expect(insert).not.toHaveBeenCalled();
   });
 });
-

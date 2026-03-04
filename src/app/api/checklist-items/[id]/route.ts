@@ -1,6 +1,5 @@
 ﻿import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { runAutomationForEvent } from "@/lib/automation/engine";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
@@ -132,14 +131,7 @@ export async function PATCH(
       throw new ApiError(500, "checklist_item_update_failed", updateError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: checklist.card_id,
-      actorId: user.id,
-      action: "checklist_item_updated",
-      metadata: { checklistItemId: id, ...payload },
-    });
-
+    
     if (payload.isCompleted === true) {
       const { data: remaining } = await supabase
         .from("checklist_items")
@@ -197,14 +189,7 @@ export async function DELETE(
       throw new ApiError(500, "checklist_item_delete_failed", deleteError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: checklist.card_id,
-      actorId: user.id,
-      action: "checklist_item_deleted",
-      metadata: { checklistItemId: id },
-    });
-
+    
     return ok({ id });
   } catch (error) {
     return fail(error as Error);

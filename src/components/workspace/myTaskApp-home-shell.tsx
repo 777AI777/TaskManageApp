@@ -1,8 +1,6 @@
 ﻿import Link from "next/link";
 import type { PropsWithChildren } from "react";
 import {
-  Activity,
-  Download,
   Grid2x2,
   Plus,
   Search,
@@ -22,9 +20,7 @@ type MainNavKey = "boards";
 type WorkspaceNavKey =
   | "boards"
   | "members"
-  | "board-management"
-  | "activity"
-  | "export";
+  | "board-management";
 
 type MyTaskAppHomeShellProps = PropsWithChildren<{
   userId: string;
@@ -96,8 +92,6 @@ export function MyTaskAppHomeShell({
             <>
               <Link href={`/w/${activeWorkspace.slug}/settings?tab=members`}>メンバー</Link>
               <Link href={`/w/${activeWorkspace.slug}/settings?tab=board-management`}>ボード管理</Link>
-              <Link href={`/w/${activeWorkspace.slug}/settings?tab=activity`}>アクティビティ</Link>
-              <Link href={`/w/${activeWorkspace.slug}/settings?tab=export`}>エクスポート</Link>
             </>
           ) : null}
         </nav>
@@ -171,20 +165,6 @@ export function MyTaskAppHomeShell({
                   <Grid2x2 size={14} />
                   <span>ボード管理</span>
                 </Link>
-                <Link
-                  className={workspaceSubNavClass(activeWorkspaceNav === "activity")}
-                  href={`/w/${activeWorkspace.slug}/settings?tab=activity`}
-                >
-                  <Activity size={14} />
-                  <span>アクティビティ</span>
-                </Link>
-                <Link
-                  className={workspaceSubNavClass(activeWorkspaceNav === "export")}
-                  href={`/w/${activeWorkspace.slug}/settings?tab=export`}
-                >
-                  <Download size={14} />
-                  <span>エクスポート</span>
-                </Link>
               </div>
             </>
           ) : null}
@@ -199,4 +179,3 @@ export function MyTaskAppHomeShell({
     </div>
   );
 }
-

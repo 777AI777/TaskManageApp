@@ -72,7 +72,6 @@ export async function GET(
       { data: cards, error: cardsError },
       { data: labels, error: labelsError },
       { data: boardPowerUps, error: boardPowerUpsError },
-      { data: activities, error: activitiesError },
       { data: customFields, error: customFieldsError },
     ] = boardIds.length
       ? await Promise.all([
@@ -81,15 +80,9 @@ export async function GET(
           supabase.from("cards").select("*").in("board_id", boardIds),
           supabase.from("labels").select("*").in("board_id", boardIds),
           supabase.from("board_power_ups").select("*").in("board_id", boardIds),
-          supabase
-            .from("activities")
-            .select("*")
-            .in("board_id", boardIds)
-            .order("created_at", { ascending: false }),
           supabase.from("custom_fields").select("*").in("board_id", boardIds),
         ])
       : [
-          { data: [] as TableRows, error: null },
           { data: [] as TableRows, error: null },
           { data: [] as TableRows, error: null },
           { data: [] as TableRows, error: null },
@@ -112,9 +105,6 @@ export async function GET(
     }
     if (boardPowerUpsError) {
       throw new ApiError(500, "power_up_lookup_failed", boardPowerUpsError.message);
-    }
-    if (activitiesError) {
-      throw new ApiError(500, "activity_lookup_failed", activitiesError.message);
     }
     if (customFieldsError) {
       throw new ApiError(500, "custom_field_lookup_failed", customFieldsError.message);
@@ -140,7 +130,9 @@ export async function GET(
       { data: attachments, error: attachmentsError },
     ] = cardIds.length
       ? await Promise.all([
-          labelIds.length ? supabase.from("card_labels").select("*").in("label_id", labelIds) : Promise.resolve({ data: [] as TableRows, error: null }),
+          labelIds.length
+            ? supabase.from("card_labels").select("*").in("label_id", labelIds)
+            : Promise.resolve({ data: [] as TableRows, error: null }),
           supabase.from("card_assignees").select("*").in("card_id", cardIds),
           supabase.from("card_watchers").select("*").in("card_id", cardIds),
           supabase.from("checklists").select("*").in("card_id", cardIds),
@@ -182,19 +174,21 @@ export async function GET(
       }
     });
 
-    const [{ data: checklistItems, error: checklistItemsError }, { data: cardCustomFieldValues, error: cardCustomFieldValuesError }] =
-      await Promise.all([
-        checklistIds.length
-          ? supabase.from("checklist_items").select("*").in("checklist_id", checklistIds)
-          : Promise.resolve({ data: [] as TableRows, error: null }),
-        cardIds.length && customFieldIds.length
-          ? supabase
-              .from("card_custom_field_values")
-              .select("*")
-              .in("card_id", cardIds)
-              .in("custom_field_id", customFieldIds)
-          : Promise.resolve({ data: [] as TableRows, error: null }),
-      ]);
+    const [
+      { data: checklistItems, error: checklistItemsError },
+      { data: cardCustomFieldValues, error: cardCustomFieldValuesError },
+    ] = await Promise.all([
+      checklistIds.length
+        ? supabase.from("checklist_items").select("*").in("checklist_id", checklistIds)
+        : Promise.resolve({ data: [] as TableRows, error: null }),
+      cardIds.length && customFieldIds.length
+        ? supabase
+            .from("card_custom_field_values")
+            .select("*")
+            .in("card_id", cardIds)
+            .in("custom_field_id", customFieldIds)
+        : Promise.resolve({ data: [] as TableRows, error: null }),
+    ]);
 
     if (checklistItemsError) {
       throw new ApiError(500, "checklist_item_lookup_failed", checklistItemsError.message);
@@ -216,7 +210,6 @@ export async function GET(
       ...(cardWatchers ?? []),
       ...(comments ?? []),
       ...(attachments ?? []),
-      ...(activities ?? []),
       ...(customFields ?? []),
       ...(boardPowerUps ?? []),
     ];
@@ -259,7 +252,6 @@ export async function GET(
       checklist_items: checklistItems ?? [],
       comments: comments ?? [],
       attachments: attachments ?? [],
-      activities: activities ?? [],
       custom_fields: customFields ?? [],
       card_custom_field_values: cardCustomFieldValues ?? [],
       board_power_ups: boardPowerUps ?? [],

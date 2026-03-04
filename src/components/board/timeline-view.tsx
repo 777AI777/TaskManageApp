@@ -604,7 +604,7 @@ export function TimelineView({
 
           {placementError ? <p className="tm-timeline-quick-add-error">{placementError}</p> : null}
           <p className="tm-timeline-placement-help">
-            {"\u4e0a\u306e\u30ab\u30fc\u30c9\u3092\u30c9\u30e9\u30c3\u30b0\u3057\u3066\u3001\u30bf\u30a4\u30e0\u30e9\u30a4\u30f3\u306e\u65e5\u4ed8\u30bb\u30eb\u306b\u30c9\u30ed\u30c3\u30d7\u3057\u3066\u304f\u3060\u3055\u3044\u3002"}
+            {"\u4e0a\u306e\u30ab\u30fc\u30c9\u3092\u30c9\u30e9\u30c3\u30b0\u3057\u3066\u3001\u30ac\u30f3\u30c8\u30c1\u30e3\u30fc\u30c8\u306e\u65e5\u4ed8\u30bb\u30eb\u306b\u30c9\u30ed\u30c3\u30d7\u3057\u3066\u304f\u3060\u3055\u3044\u3002"}
           </p>
         </div>
       ) : null}

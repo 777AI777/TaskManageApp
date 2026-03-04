@@ -15,6 +15,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { CSS } from "@dnd-kit/utilities";
 import {
@@ -24,8 +29,6 @@ import {
   GitBranch,
   GripVertical,
   Kanban,
-  LayoutDashboard,
-  MapPin,
   Table,
   X,
   type LucideIcon,
@@ -35,7 +38,6 @@ import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useS
 
 import { CalendarView } from "@/components/board/calendar-view";
 import { CardDetailDrawer } from "@/components/board/card-detail-drawer";
-import { DashboardView } from "@/components/board/dashboard-view";
 import { TableView } from "@/components/board/table-view";
 import { TimelineView } from "@/components/board/timeline-view";
 import { CreateBoardForm } from "@/components/workspace/create-board-form";
@@ -46,10 +48,8 @@ import type {
   Checklist,
   ChecklistItem,
   Attachment,
-  Activity,
   CardDetailData,
   BoardDataBundle,
-  DashboardTile,
   BoardList,
   CardCustomFieldValue,
   CardWatcher,
@@ -63,10 +63,6 @@ import {
   booleanLabel,
 } from "@/lib/board-ui-text";
 import {
-  applyCardAssigneeSnapshot,
-  applyCardLabelSnapshot,
-  getActivityCardId,
-  parseActivityRelationshipMetadata,
   removeRealtimeCard,
   removeRealtimeList,
   upsertRealtimeCard,
@@ -74,6 +70,7 @@ import {
 } from "@/lib/board-realtime";
 import {
   canManageBoard,
+  getReorderedItemPosition,
   matchesDueBucket,
   resolveCardDeadlineState,
   type DueBucket,
@@ -92,7 +89,7 @@ import {
   toLocalStartIso,
 } from "@/lib/timeline-utils";
 
-type ViewMode = "board" | "calendar" | "table" | "timeline" | "dashboard";
+type ViewMode = "board" | "calendar" | "table" | "timeline";
 type MemberFilters = {
   unassigned: boolean;
   assignedToMe: boolean;
@@ -128,10 +125,9 @@ type CalendarOverTarget = {
   dayKey: string;
 };
 type ViewMenuItem = {
-  mode: ViewMode | "map";
+  mode: ViewMode;
   label: string;
   icon: LucideIcon;
-  disabled?: boolean;
 };
 const UNIFIED_BOARD_BACKGROUND = "#c0c5d1";
 const DEFAULT_MEMBER_FILTERS: MemberFilters = { unassigned: false, assignedToMe: false, memberIds: [] };
@@ -149,10 +145,20 @@ const VIEW_MENU_ITEMS: ViewMenuItem[] = [
   { mode: "board", label: "\u30dc\u30fc\u30c9", icon: Kanban },
   { mode: "table", label: "\u30c6\u30fc\u30d6\u30eb", icon: Table },
   { mode: "calendar", label: "\u30ab\u30ec\u30f3\u30c0\u30fc", icon: Calendar },
-  { mode: "dashboard", label: "\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9", icon: LayoutDashboard },
-  { mode: "timeline", label: "\u30bf\u30a4\u30e0\u30e9\u30a4\u30f3", icon: GitBranch },
-  { mode: "map", label: "\u30de\u30c3\u30d7", icon: MapPin, disabled: true },
+  { mode: "timeline", label: "\u30ac\u30f3\u30c8\u30c1\u30e3\u30fc\u30c8", icon: GitBranch },
 ];
+const LIST_COLUMN_DND_PREFIX = "list-column:";
+const LIST_REORDER_ERROR_MESSAGE = "Failed to reorder list.";
+
+function getListColumnDndId(listId: string): string {
+  return `${LIST_COLUMN_DND_PREFIX}${listId}`;
+}
+
+function parseListColumnDndId(id: string): string | null {
+  if (!id.startsWith(LIST_COLUMN_DND_PREFIX)) return null;
+  const listId = id.slice(LIST_COLUMN_DND_PREFIX.length);
+  return listId.length > 0 ? listId : null;
+}
 
 function parseTimelineActiveId(id: string): { kind: TimelineDragKind; cardId: string } | null {
   const match = /^timeline:(move|resize-start|resize-end):([^:]+)$/.exec(id);
@@ -263,18 +269,6 @@ function isCalendarDayDroppableId(id: string): boolean {
   return /^calendar:day:\d{4}-\d{2}-\d{2}$/.test(id);
 }
 
-function normalizeDashboardTiles(tiles: DashboardTile[] | null | undefined): DashboardTile[] {
-  if (!Array.isArray(tiles)) return [];
-  return [...tiles]
-    .filter((tile) => tile && typeof tile.id === "string" && tile.id.length > 0)
-    .sort((a, b) => a.position - b.position)
-    .map((tile, index): DashboardTile => ({
-      ...tile,
-      size: tile.size === "full" ? "full" : "half",
-      position: index,
-    }));
-}
-
 function formatCustomFieldValue(
   field: CustomField,
   value: CardCustomFieldValue | undefined,
@@ -297,6 +291,26 @@ function formatCardDueLabel(dueAtIso: string | null): string | null {
   const dueDate = new Date(dueAtIso);
   if (Number.isNaN(dueDate.valueOf())) return null;
   return dueDate.toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
+}
+
+function toDateInputValue(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function toDueAtIsoFromDate(value: string): string | null {
+  if (!value) return null;
+  const dueAt = new Date(`${value}T23:59:00`);
+  if (Number.isNaN(dueAt.getTime())) return null;
+  return dueAt.toISOString();
+}
+
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 }
 
 function toAssigneeInitial(name: string | null): string | null {
@@ -324,7 +338,12 @@ function CardPresentation({
       ) : null}
       <div className="min-w-0 flex-1 space-y-2">
         <div className="tm-card-main-row">
-          <p className={`text-sm font-semibold truncate ${card.archived ? "opacity-70" : ""}`}>{card.title}</p>
+          <p
+            className={`tm-card-title-clamp text-sm font-semibold ${card.archived ? "opacity-70" : ""}`}
+            title={card.title}
+          >
+            {card.title}
+          </p>
           {meta?.assigneePrimary ? (
             <span className="tm-task-assignee-pill" title={meta.assigneeTooltip ?? undefined}>
               <span className="tm-task-assignee-initial" style={{ backgroundColor: resolveAvatarColor(meta.assigneeColor) }}>
@@ -397,11 +416,29 @@ function Column({
   onArchive: (list: BoardList) => void;
   onRename: (id: string, name: string) => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `list:${list.id}` });
   const [editingName, setEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(list.name);
   const [showListActions, setShowListActions] = useState(false);
   const listActionsRef = useRef<HTMLDivElement | null>(null);
+  const { setNodeRef: setCardDropNodeRef, isOver } = useDroppable({ id: `list:${list.id}` });
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setSortableNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: getListColumnDndId(list.id),
+    disabled: editingName,
+  });
+  const style: CSSProperties | undefined =
+    transform || transition
+      ? {
+          transform: CSS.Translate.toString(transform),
+          transition,
+        }
+      : undefined;
 
   useEffect(() => {
     if (!showListActions) return;
@@ -456,25 +493,36 @@ function Column({
   }
 
   return (
-    <section ref={setNodeRef} className={`tm-list-column ${isOver ? "ring-2 ring-blue-400" : ""}`}>
+    <section
+      ref={setSortableNodeRef}
+      style={style}
+      className={`tm-list-column tm-list-column-sortable ${isOver ? "ring-2 ring-blue-400" : ""} ${
+        isDragging ? "tm-list-column-sortable-dragging" : ""
+      }`}
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
-        {editingName ? (
-          <input
-            className="tm-list-name-input"
-            value={nameInput}
-            onChange={(event) => setNameInput(event.target.value)}
-            onBlur={() => void submitRename()}
-            onKeyDown={handleNameKeyDown}
-            autoFocus
-          />
-        ) : (
-          <h3
-            className="tm-list-title truncate text-sm font-bold cursor-pointer rounded px-1 -mx-1 hover:bg-black/5"
-            onClick={() => { setNameInput(list.name); setEditingName(true); }}
-          >
-            {list.name}
-          </h3>
-        )}
+        <div
+          className={`min-w-0 flex-1 ${editingName ? "" : "tm-list-column-header-drag-handle"}`}
+          {...(editingName ? {} : { ...attributes, ...listeners })}
+        >
+          {editingName ? (
+            <input
+              className="tm-list-name-input"
+              value={nameInput}
+              onChange={(event) => setNameInput(event.target.value)}
+              onBlur={() => void submitRename()}
+              onKeyDown={handleNameKeyDown}
+              autoFocus
+            />
+          ) : (
+            <h3
+              className="tm-list-title truncate text-sm font-bold cursor-pointer rounded px-1 -mx-1 hover:bg-black/5"
+              onClick={() => { setNameInput(list.name); setEditingName(true); }}
+            >
+              {list.name}
+            </h3>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="tm-list-count text-xs">{cards.length}</span>
           {canArchive ? (
@@ -508,22 +556,24 @@ function Column({
           ) : null}
         </div>
       </div>
-      <div className="flex min-h-24 flex-1 flex-col gap-2">
-        {cards.map((card) => (
-          <DnDCard
-            key={card.id}
-            card={card}
-            meta={cardMetaById.get(card.id)}
-            onOpen={onOpen}
-          />
-        ))}
+      <div ref={setCardDropNodeRef}>
+        <div className="flex min-h-24 flex-1 flex-col gap-2">
+          {cards.map((card) => (
+            <DnDCard
+              key={card.id}
+              card={card}
+              meta={cardMetaById.get(card.id)}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+        <form className="mt-3 space-y-2" onSubmit={onCreate}>
+          <input className="tm-input" value={draft} onChange={(event) => onDraft(event.target.value)} placeholder={"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"} />
+          <button className="tm-button tm-button-secondary w-full" type="submit">
+            {"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"}
+          </button>
+        </form>
       </div>
-      <form className="mt-3 space-y-2" onSubmit={onCreate}>
-        <input className="tm-input" value={draft} onChange={(event) => onDraft(event.target.value)} placeholder={"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"} />
-        <button className="tm-button tm-button-secondary w-full" type="submit">
-          {"\u30ab\u30fc\u30c9\u3092\u8ffd\u52a0"}
-        </button>
-      </form>
     </section>
   );
 }
@@ -544,6 +594,17 @@ export function BoardClient({
   );
   const collisionDetection = useCallback<CollisionDetection>((args) => {
     const activeId = args.active?.id ? String(args.active.id) : "";
+    const listColumnActive = parseListColumnDndId(activeId);
+    if (listColumnActive) {
+      const listColumnContainers = args.droppableContainers.filter((container) =>
+        Boolean(parseListColumnDndId(String(container.id))),
+      );
+      if (!listColumnContainers.length) {
+        return closestCenter(args);
+      }
+      return closestCenter({ ...args, droppableContainers: listColumnContainers });
+    }
+
     const calendarActive = parseCalendarActiveId(activeId);
     if (!calendarActive || calendarActive.kind !== "move") {
       return rectIntersection(args);
@@ -596,11 +657,8 @@ export function BoardClient({
   const [checklists, setChecklists] = useState<Checklist[]>([]);
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
   const [cardDetailLoadingById, setCardDetailLoadingById] = useState<Record<string, boolean>>({});
   const loadedCardDetailRef = useRef(new Set<string>());
-  const cardDetailReloadTimersRef = useRef(new Map<string, number>());
-  const selectedCardIdRef = useRef<string | null>(null);
   const checklistsRef = useRef<Checklist[]>([]);
 
   const [boardName, setBoardName] = useState(initialData.board.name);
@@ -609,9 +667,6 @@ export function BoardClient({
   const [isEditingBoardName, setIsEditingBoardName] = useState(false);
   const [boardNameDraft, setBoardNameDraft] = useState(initialData.board.name);
   const [isSavingBoardName, setIsSavingBoardName] = useState(false);
-  const [dashboardTiles, setDashboardTiles] = useState<DashboardTile[]>(
-    normalizeDashboardTiles(initialData.board.dashboard_tiles),
-  );
 
   const defaultView: ViewMode =
     initialData.preferences?.selected_view === "calendar"
@@ -620,9 +675,7 @@ export function BoardClient({
         ? "table"
         : initialData.preferences?.selected_view === "timeline"
           ? "timeline"
-          : initialData.preferences?.selected_view === "dashboard"
-            ? "dashboard"
-              : "board";
+          : "board";
   const [viewMode, setViewMode] = useState<ViewMode>(defaultView);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(initialData.preferences?.left_rail_collapsed ?? false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
@@ -638,6 +691,8 @@ export function BoardClient({
 
   const [newListName, setNewListName] = useState("");
   const [cardDrafts, setCardDrafts] = useState<Record<string, string>>({});
+  const [tableSavingByCardId, setTableSavingByCardId] = useState<Record<string, boolean>>({});
+  const tableSavingByCardIdRef = useRef<Record<string, boolean>>({});
   const [activeDragCardId, setActiveDragCardId] = useState<string | null>(null);
   const [activeCardId, setActiveCardId] = useState<string | null>(initialCardId);
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
@@ -650,21 +705,26 @@ export function BoardClient({
     () => [...lists].filter((list) => !list.is_archived).sort((a, b) => a.position - b.position),
     [lists],
   );
+  const sortableListColumnIds = useMemo(
+    () => sortedLists.map((list) => getListColumnDndId(list.id)),
+    [sortedLists],
+  );
 
   const selectedCard = activeCardId ? cards.find((card) => card.id === activeCardId) ?? null : null;
   const selectedCardId = selectedCard?.id ?? null;
+  const selectedCardDetailLoading = selectedCard ? Boolean(cardDetailLoadingById[selectedCard.id]) : false;
 
   useEffect(() => {
     setActiveCardId(initialCardId ?? null);
   }, [initialCardId]);
 
   useEffect(() => {
-    selectedCardIdRef.current = selectedCardId;
+    setShareLinkCopied(false);
   }, [selectedCardId]);
 
   useEffect(() => {
-    setShareLinkCopied(false);
-  }, [selectedCardId]);
+    tableSavingByCardIdRef.current = tableSavingByCardId;
+  }, [tableSavingByCardId]);
 
   useEffect(() => {
     checklistsRef.current = checklists;
@@ -843,18 +903,43 @@ export function BoardClient({
     [sortedCustomFields],
   );
 
+  const tableLists = useMemo(
+    () => sortedLists.map((list) => ({ id: list.id, name: list.name })),
+    [sortedLists],
+  );
+
+  const tableLabels = useMemo(
+    () =>
+      labels.map((label) => ({
+        id: label.id,
+        name: label.name || "（無題ラベル）",
+      })),
+    [labels],
+  );
+
+  const tableMembers = useMemo(
+    () =>
+      initialData.members.map((member) => ({
+        id: member.user_id,
+        name: memberNameById.get(member.user_id) ?? member.user_id,
+      })),
+    [initialData.members, memberNameById],
+  );
+
   const tableRows = useMemo(() => {
     return [...filteredCards]
       .sort((a, b) => a.position - b.position)
       .map((card) => {
         const meta = cardMetaById.get(card.id);
-        const labelIds = cardLabels
-          .filter((item) => item.card_id === card.id)
-          .map((item) => item.label_id);
+        const labelIds = labelIdsByCard.get(card.id) ?? [];
+        const assigneeIds = assigneeIdsByCard.get(card.id) ?? [];
         return {
           id: card.id,
           title: card.title,
+          listId: card.list_id,
           listName: listNameById.get(card.list_id) ?? BOARD_COMMON_LABELS.unknown,
+          labelIds,
+          assigneeIds,
           assigneePrimary: meta?.assigneePrimary ?? null,
           assigneeExtraCount: meta?.assigneeExtraCount ?? 0,
           labels: labelIds.map((id) => labelNameById.get(id) ?? id),
@@ -865,14 +950,17 @@ export function BoardClient({
             }),
           ) as Record<string, string>,
           dueAt: card.due_at,
+          dueDateValue: toDateInputValue(card.due_at),
           dueLabel: meta?.dueLabel ?? null,
           deadlineState: meta?.deadlineState ?? resolveCardDeadlineState(card.due_at, card.is_completed),
+          isCompleted: card.is_completed,
         };
       });
   }, [
     filteredCards,
     cardMetaById,
-    cardLabels,
+    labelIdsByCard,
+    assigneeIdsByCard,
     listNameById,
     labelNameById,
     sortedCustomFields,
@@ -922,10 +1010,6 @@ export function BoardClient({
       ...current.filter((attachment) => attachment.card_id !== cardId),
       ...detail.attachments,
     ]);
-    setActivities((current) => [
-      ...current.filter((activity) => activity.card_id !== cardId),
-      ...detail.activities,
-    ]);
   }, []);
 
   const fetchCardDetail = useCallback(
@@ -958,34 +1042,21 @@ export function BoardClient({
     [applyCardDetailData],
   );
 
-  const scheduleCardDetailRefresh = useCallback(
-    (cardId: string) => {
-      if (selectedCardIdRef.current !== cardId) return;
-
-      const currentTimer = cardDetailReloadTimersRef.current.get(cardId);
-      if (currentTimer !== undefined) {
-        window.clearTimeout(currentTimer);
-      }
-
-      const timer = window.setTimeout(() => {
-        cardDetailReloadTimersRef.current.delete(cardId);
-        void fetchCardDetail(cardId, { force: true });
-      }, 250);
-      cardDetailReloadTimersRef.current.set(cardId, timer);
-    },
-    [fetchCardDetail],
-  );
-
-  useEffect(() => {
-    return () => {
-      cardDetailReloadTimersRef.current.forEach((timer) => window.clearTimeout(timer));
-      cardDetailReloadTimersRef.current.clear();
-    };
-  }, []);
-
   useEffect(() => {
     if (!selectedCardId) return;
     void fetchCardDetail(selectedCardId);
+  }, [fetchCardDetail, selectedCardId]);
+
+  useEffect(() => {
+    if (!selectedCardId) return;
+
+    const timer = window.setInterval(() => {
+      void fetchCardDetail(selectedCardId, { force: true });
+    }, 10_000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
   }, [fetchCardDetail, selectedCardId]);
 
   useEffect(() => {
@@ -1013,7 +1084,6 @@ export function BoardClient({
               checklists: [],
               checklistItems: [],
               attachments: [],
-              activities: [],
             });
             return;
           }
@@ -1032,7 +1102,6 @@ export function BoardClient({
               checklists: [],
               checklistItems: [],
               attachments: [],
-              activities: [],
             });
           }
         },
@@ -1058,62 +1127,13 @@ export function BoardClient({
           const normalized = nextList as BoardList;
           setLists((current) => upsertRealtimeList(current, normalized));
         },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "activities",
-          filter: `board_id=eq.${boardId}`,
-        },
-        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
-          if (payload.eventType === "DELETE") {
-            const removedActivity = payload.old as Partial<Activity>;
-            if (!removedActivity.id) return;
-            setActivities((current) =>
-              current.filter((activity) => activity.id !== removedActivity.id),
-            );
-            return;
-          }
-
-          const nextActivity = payload.new as Partial<Activity>;
-          if (!nextActivity.id) return;
-          const normalized = nextActivity as Activity;
-
-          setActivities((current) => [
-            normalized,
-            ...current.filter((activity) => activity.id !== normalized.id),
-          ]);
-
-          if (normalized.action === "card_updated" && typeof normalized.card_id === "string") {
-            const { assigneeIds, labelIds } = parseActivityRelationshipMetadata(
-              (normalized.metadata ?? {}) as Record<string, unknown>,
-            );
-            if (assigneeIds) {
-              setCardAssignees((current) =>
-                applyCardAssigneeSnapshot(current, normalized.card_id as string, assigneeIds),
-              );
-            }
-            if (labelIds) {
-              setCardLabels((current) =>
-                applyCardLabelSnapshot(current, normalized.card_id as string, labelIds),
-              );
-            }
-          }
-
-          const activityCardId = getActivityCardId(normalized);
-          if (activityCardId) {
-            scheduleCardDetailRefresh(activityCardId);
-          }
-        },
       );
 
     channel.subscribe();
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [applyCardDetailData, initialData.board.id, scheduleCardDetailRefresh, supabase]);
+  }, [applyCardDetailData, initialData.board.id, supabase]);
 
 
   const boardBackground = useMemo<CSSProperties>(
@@ -1144,6 +1164,13 @@ export function BoardClient({
     } catch (copyError) {
       setError(copyError instanceof Error ? copyError.message : "リンクのコピーに失敗しました。");
     }
+  }
+
+  function refreshSelectedCardDetail() {
+    if (!selectedCardId || selectedCardDetailLoading) {
+      return;
+    }
+    void fetchCardDetail(selectedCardId, { force: true });
   }
 
   async function persistPreferences(patch: {
@@ -1239,6 +1266,163 @@ export function BoardClient({
     return body.data as BoardCard;
   }
 
+  function replaceCardAssignees(cardId: string, nextAssigneeIds: string[]) {
+    setCardAssignees((current) => [
+      ...current.filter((item) => item.card_id !== cardId),
+      ...nextAssigneeIds.map((userId) => ({ card_id: cardId, user_id: userId })),
+    ]);
+  }
+
+  function replaceCardLabels(cardId: string, nextLabelIds: string[]) {
+    setCardLabels((current) => [
+      ...current.filter((item) => item.card_id !== cardId),
+      ...nextLabelIds.map((labelId) => ({ card_id: cardId, label_id: labelId })),
+    ]);
+  }
+
+  async function runTableCardPatch({
+    cardId,
+    patch,
+    applyOptimistic,
+    rollback,
+    fallbackMessage,
+  }: {
+    cardId: string;
+    patch: Record<string, unknown>;
+    applyOptimistic: () => void;
+    rollback: () => void;
+    fallbackMessage: string;
+  }) {
+    if (tableSavingByCardIdRef.current[cardId]) return;
+
+    setError(null);
+    setTableSavingByCardId((current) => ({ ...current, [cardId]: true }));
+    tableSavingByCardIdRef.current = { ...tableSavingByCardIdRef.current, [cardId]: true };
+
+    applyOptimistic();
+    try {
+      const updated = await patchCard(cardId, patch);
+      setCards((current) => current.map((card) => (card.id === cardId ? updated : card)));
+    } catch (error) {
+      rollback();
+      setError(error instanceof Error ? error.message : fallbackMessage);
+    } finally {
+      setTableSavingByCardId((current) => ({ ...current, [cardId]: false }));
+      tableSavingByCardIdRef.current = { ...tableSavingByCardIdRef.current, [cardId]: false };
+    }
+  }
+
+  function handleTableListChange(cardId: string, nextListId: string) {
+    const previousCard = cards.find((card) => card.id === cardId);
+    if (!previousCard || previousCard.list_id === nextListId) return;
+
+    void runTableCardPatch({
+      cardId,
+      patch: { listId: nextListId },
+      applyOptimistic: () => {
+        setCards((current) =>
+          current.map((card) => (card.id === cardId ? { ...card, list_id: nextListId } : card)),
+        );
+      },
+      rollback: () => {
+        setCards((current) =>
+          current.map((card) => (card.id === cardId ? { ...card, list_id: previousCard.list_id } : card)),
+        );
+      },
+      fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
+    });
+  }
+
+  function handleTableLabelsChange(cardId: string, nextLabelIds: string[]) {
+    const previousLabelIds = labelIdsByCard.get(cardId) ?? [];
+    if (areStringArraysEqual(previousLabelIds, nextLabelIds)) return;
+
+    void runTableCardPatch({
+      cardId,
+      patch: { labelIds: nextLabelIds },
+      applyOptimistic: () => replaceCardLabels(cardId, nextLabelIds),
+      rollback: () => replaceCardLabels(cardId, previousLabelIds),
+      fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
+    });
+  }
+
+  function handleTableAssigneesChange(cardId: string, nextAssigneeIds: string[]) {
+    const previousAssigneeIds = assigneeIdsByCard.get(cardId) ?? [];
+    if (areStringArraysEqual(previousAssigneeIds, nextAssigneeIds)) return;
+
+    void runTableCardPatch({
+      cardId,
+      patch: { assigneeIds: nextAssigneeIds },
+      applyOptimistic: () => replaceCardAssignees(cardId, nextAssigneeIds),
+      rollback: () => replaceCardAssignees(cardId, previousAssigneeIds),
+      fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
+    });
+  }
+
+  function handleTableDueDateChange(cardId: string, dueDate: string | null) {
+    const previousCard = cards.find((card) => card.id === cardId);
+    if (!previousCard) return;
+
+    const previousDueDate = toDateInputValue(previousCard.due_at);
+    const nextDueDate = dueDate ?? "";
+    if (previousDueDate === nextDueDate) return;
+
+    const nextDueAtIso = dueDate ? toDueAtIsoFromDate(dueDate) : null;
+    if (dueDate && !nextDueAtIso) {
+      setError("期限日の形式が正しくありません。");
+      return;
+    }
+
+    void runTableCardPatch({
+      cardId,
+      patch: { dueAt: nextDueAtIso },
+      applyOptimistic: () => {
+        setCards((current) =>
+          current.map((card) => (card.id === cardId ? { ...card, due_at: nextDueAtIso } : card)),
+        );
+      },
+      rollback: () => {
+        setCards((current) =>
+          current.map((card) => (card.id === cardId ? { ...card, due_at: previousCard.due_at } : card)),
+        );
+      },
+      fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
+    });
+  }
+
+  function handleTableStatusChange(cardId: string, isCompleted: boolean) {
+    const previousCard = cards.find((card) => card.id === cardId);
+    if (!previousCard || previousCard.is_completed === isCompleted) return;
+
+    const completedAt = isCompleted ? new Date().toISOString() : null;
+
+    void runTableCardPatch({
+      cardId,
+      patch: { isCompleted },
+      applyOptimistic: () => {
+        setCards((current) =>
+          current.map((card) =>
+            card.id === cardId ? { ...card, is_completed: isCompleted, completed_at: completedAt } : card,
+          ),
+        );
+      },
+      rollback: () => {
+        setCards((current) =>
+          current.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  is_completed: previousCard.is_completed,
+                  completed_at: previousCard.completed_at,
+                }
+              : card,
+          ),
+        );
+      },
+      fallbackMessage: BOARD_ERROR_MESSAGES.moveCard,
+    });
+  }
+
   async function archiveList(list: BoardList) {
     const response = await fetch(`/api/lists/${list.id}/archive`, {
       method: "POST",
@@ -1252,6 +1436,18 @@ export function BoardClient({
     }
     setLists((current) => current.map((value) => (value.id === list.id ? body.data : value)));
     setCards((current) => current.filter((card) => card.list_id !== list.id));
+  }
+
+  async function updateListPosition(listId: string, position: number) {
+    const response = await fetch(`/api/lists/${listId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ position }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(body?.error?.message ?? LIST_REORDER_ERROR_MESSAGE);
+    }
   }
 
   function cancelBoardNameEdit() {
@@ -1319,26 +1515,6 @@ export function BoardClient({
       event.preventDefault();
       startBoardNameEdit();
     }
-  }
-
-  async function updateDashboardTiles(nextTiles: DashboardTile[]) {
-    if (!canManageBoardUi) return;
-    const previous = dashboardTiles;
-    const normalized = normalizeDashboardTiles(nextTiles);
-    setDashboardTiles(normalized);
-
-    const response = await fetch(`/api/boards/${initialData.board.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dashboardTiles: normalized }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      setDashboardTiles(previous);
-      setError(body?.error?.message ?? BOARD_ERROR_MESSAGES.updateDashboardTiles);
-      return;
-    }
-    setDashboardTiles(normalizeDashboardTiles((body.data?.dashboard_tiles ?? normalized) as DashboardTile[]));
   }
 
   function resetTimelineDragTracking() {
@@ -1414,8 +1590,34 @@ export function BoardClient({
     }
     const timelineActive = parseTimelineActiveId(activeId);
     const calendarActive = parseCalendarActiveId(activeId);
+    const activeListColumnId = parseListColumnDndId(activeId);
+    const overListColumnId = overId ? parseListColumnDndId(overId) : null;
     if (activeId === overId && overId && !timelineActive && !calendarActive) {
       resetTimelineDragTracking();
+      return;
+    }
+
+    if (activeListColumnId) {
+      resetTimelineDragTracking();
+      if (!overListColumnId || activeListColumnId === overListColumnId) {
+        return;
+      }
+      const targetPosition = getReorderedItemPosition(sortedLists, activeListColumnId, overListColumnId);
+      if (targetPosition === null) return;
+
+      const previous = lists;
+      setLists((current) =>
+        current.map((list) =>
+          list.id === activeListColumnId ? { ...list, position: targetPosition } : list,
+        ),
+      );
+
+      try {
+        await updateListPosition(activeListColumnId, targetPosition);
+      } catch (error) {
+        setLists(previous);
+        setError(error instanceof Error ? error.message : LIST_REORDER_ERROR_MESSAGE);
+      }
       return;
     }
 
@@ -1633,7 +1835,10 @@ export function BoardClient({
     if (!overId) return;
 
     const overCard = overId.startsWith("card:") ? cards.find((card) => card.id === overId.replace("card:", "")) : null;
-    const targetListId = overId.startsWith("list:") ? overId.replace("list:", "") : overCard?.list_id;
+    const targetListId =
+      overId.startsWith("list:")
+        ? overId.replace("list:", "")
+        : overListColumnId ?? overCard?.list_id;
     if (!targetListId || !activeId.startsWith("card:")) return;
 
     const movingCard = cards.find((card) => card.id === activeId.replace("card:", ""));
@@ -1711,10 +1916,6 @@ export function BoardClient({
         : [...current.labelIds, labelId],
     }));
   }
-
-  const selectedCardActivities = selectedCard
-    ? activities.filter((activity) => activity.card_id === selectedCard.id).slice(0, 20)
-    : [];
 
   const userInitial = (
     initialData.currentUser.display_name ??
@@ -1918,11 +2119,7 @@ export function BoardClient({
                               key={item.mode}
                               className={`tm-view-picker-item ${isActive ? "tm-view-picker-item-active" : ""}`}
                               type="button"
-                              onClick={() => {
-                                if (item.disabled || item.mode === "map") return;
-                                selectView(item.mode);
-                              }}
-                              disabled={item.disabled}
+                              onClick={() => selectView(item.mode)}
                             >
                               <Icon className="tm-view-picker-icon" />
                               <span>{item.label}</span>
@@ -2127,7 +2324,16 @@ export function BoardClient({
                 <TableView
                   rows={tableRows}
                   customFieldColumns={tableCustomFieldColumns}
+                  lists={tableLists}
+                  labels={tableLabels}
+                  members={tableMembers}
+                  savingByCardId={tableSavingByCardId}
                   onSelectCard={openCard}
+                  onListChange={handleTableListChange}
+                  onLabelsChange={handleTableLabelsChange}
+                  onAssigneesChange={handleTableAssigneesChange}
+                  onDueDateChange={handleTableDueDateChange}
+                  onStatusChange={handleTableStatusChange}
                 />
               </section>
             ) : null}
@@ -2145,88 +2351,74 @@ export function BoardClient({
               </section>
             ) : null}
 
-            {viewMode === "dashboard" ? (
-              <section className="tm-view-card">
-                <DashboardView
-                  cards={filteredCards}
-                  lists={sortedLists}
-                  members={initialData.members}
-                  labels={labels}
-                  cardAssignees={cardAssignees}
-                  cardLabels={cardLabels}
-                  tiles={dashboardTiles}
-                  canEdit={canManageBoardUi}
-                  onTilesChange={updateDashboardTiles}
-                />
-              </section>
-            ) : null}
-
             {viewMode === "board" ? (
               <section className="tm-board-lists-wrap">
-                <div className="tm-board-lists">
-                  {sortedLists.map((list) => (
-                    <Column
-                      key={list.id}
-                      list={list}
-                      cards={cardsByList.get(list.id) ?? []}
-                      cardMetaById={cardMetaById}
-                      onOpen={openCard}
-                      canArchive={canManageBoardUi}
-                      onArchive={(target) => void archiveList(target)}
-                      onRename={(id, name) => setLists((current) => current.map((l) => (l.id === id ? { ...l, name } : l)))}
-                      draft={cardDrafts[list.id] ?? ""}
-                      onDraft={(value) => setCardDrafts((current) => ({ ...current, [list.id]: value }))}
-                      onCreate={(event) => {
-                        event.preventDefault();
-                        const title = (cardDrafts[list.id] ?? "").trim();
-                        if (!title) return;
-                        void createCard(list.id, title);
-                        setCardDrafts((current) => ({ ...current, [list.id]: "" }));
-                      }}
-                    />
-                  ))}
-                  <div className="tm-list-adder">
-                    {showListComposer ? (
-                      <form
-                        className="tm-list-composer"
-                        onSubmit={(event) => {
+                <SortableContext items={sortableListColumnIds} strategy={horizontalListSortingStrategy}>
+                  <div className="tm-board-lists">
+                    {sortedLists.map((list) => (
+                      <Column
+                        key={list.id}
+                        list={list}
+                        cards={cardsByList.get(list.id) ?? []}
+                        cardMetaById={cardMetaById}
+                        onOpen={openCard}
+                        canArchive={canManageBoardUi}
+                        onArchive={(target) => void archiveList(target)}
+                        onRename={(id, name) => setLists((current) => current.map((l) => (l.id === id ? { ...l, name } : l)))}
+                        draft={cardDrafts[list.id] ?? ""}
+                        onDraft={(value) => setCardDrafts((current) => ({ ...current, [list.id]: value }))}
+                        onCreate={(event) => {
                           event.preventDefault();
-                          if (!newListName.trim()) return;
-                          void createList(newListName.trim());
-                          setNewListName("");
-                          setShowListComposer(false);
+                          const title = (cardDrafts[list.id] ?? "").trim();
+                          if (!title) return;
+                          void createCard(list.id, title);
+                          setCardDrafts((current) => ({ ...current, [list.id]: "" }));
                         }}
-                      >
-                        <input
-                          autoFocus
-                          className="tm-input"
-                          value={newListName}
-                          onChange={(event) => setNewListName(event.target.value)}
-                          placeholder={"\u65b0\u3057\u3044\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
-                        />
-                        <div className="flex items-center gap-2">
-                          <button className="tm-button tm-button-primary" type="submit">
-                            {"\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
-                          </button>
-                          <button
-                            className="tm-button tm-button-secondary"
-                            type="button"
-                            onClick={() => {
-                              setShowListComposer(false);
-                              setNewListName("");
-                            }}
-                          >
-                            {"\u30ad\u30e3\u30f3\u30bb\u30eb"}
-                          </button>
-                        </div>
-                      </form>
-                    ) : (
-                      <button className="tm-add-list-trigger" type="button" onClick={() => setShowListComposer(true)}>
-                        {"+ \u3082\u30461\u3064\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
-                      </button>
-                    )}
+                      />
+                    ))}
+                    <div className="tm-list-adder">
+                      {showListComposer ? (
+                        <form
+                          className="tm-list-composer"
+                          onSubmit={(event) => {
+                            event.preventDefault();
+                            if (!newListName.trim()) return;
+                            void createList(newListName.trim());
+                            setNewListName("");
+                            setShowListComposer(false);
+                          }}
+                        >
+                          <input
+                            autoFocus
+                            className="tm-input"
+                            value={newListName}
+                            onChange={(event) => setNewListName(event.target.value)}
+                            placeholder={"\u65b0\u3057\u3044\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
+                          />
+                          <div className="flex items-center gap-2">
+                            <button className="tm-button tm-button-primary" type="submit">
+                              {"\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
+                            </button>
+                            <button
+                              className="tm-button tm-button-secondary"
+                              type="button"
+                              onClick={() => {
+                                setShowListComposer(false);
+                                setNewListName("");
+                              }}
+                            >
+                              {"\u30ad\u30e3\u30f3\u30bb\u30eb"}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <button className="tm-add-list-trigger" type="button" onClick={() => setShowListComposer(true)}>
+                          {"+ \u3082\u30461\u3064\u30ea\u30b9\u30c8\u3092\u8ffd\u52a0"}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </SortableContext>
               </section>
             ) : null}
 
@@ -2243,13 +2435,23 @@ export function BoardClient({
       </div>
 
       {selectedCard ? (
-        <button
-          type="button"
-          onClick={() => void copyCardShareLink(selectedCard.id)}
-          className="fixed right-20 top-5 z-[70] rounded-md border border-[#d0d4db] bg-[#f1f2f4] px-3 py-1.5 text-xs font-semibold text-[#172b4d] hover:bg-[#dfe1e6]"
-        >
-          {shareLinkCopied ? "コピー済み" : "リンクをコピー"}
-        </button>
+        <div className="fixed right-20 top-5 z-[70] flex items-center gap-2">
+          <button
+            type="button"
+            onClick={refreshSelectedCardDetail}
+            disabled={selectedCardDetailLoading}
+            className="rounded-md border border-[#d0d4db] bg-[#f1f2f4] px-3 py-1.5 text-xs font-semibold text-[#172b4d] hover:bg-[#dfe1e6] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {selectedCardDetailLoading ? "更新中..." : "更新"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void copyCardShareLink(selectedCard.id)}
+            className="rounded-md border border-[#d0d4db] bg-[#f1f2f4] px-3 py-1.5 text-xs font-semibold text-[#172b4d] hover:bg-[#dfe1e6]"
+          >
+            {shareLinkCopied ? "コピー済み" : "リンクをコピー"}
+          </button>
+        </div>
       ) : null}
 
       {selectedCard ? (
@@ -2271,8 +2473,7 @@ export function BoardClient({
           checklists={checklists}
           checklistItems={checklistItems}
           attachments={attachments}
-          activities={selectedCardActivities}
-          detailLoading={Boolean(cardDetailLoadingById[selectedCard.id])}
+          detailLoading={selectedCardDetailLoading}
           onClose={closeCard}
           onCardPatched={(updatedCard) =>
             setCards((current) => current.map((value) => (value.id === updatedCard.id ? updatedCard : value)))
@@ -2307,6 +2508,12 @@ export function BoardClient({
           }}
           onCommentCreated={(comment) => setComments((current) => [...current, comment])}
           onChecklistCreated={(checklist) => setChecklists((current) => [...current, checklist])}
+          onChecklistDeleted={(checklistId) => {
+            setChecklists((current) => current.filter((value) => value.id !== checklistId));
+            setChecklistItems((current) =>
+              current.filter((value) => value.checklist_id !== checklistId),
+            );
+          }}
           onChecklistItemCreated={(item) => setChecklistItems((current) => [...current, item])}
           onChecklistItemPatched={(item) =>
             setChecklistItems((current) => current.map((value) => (value.id === item.id ? item : value)))

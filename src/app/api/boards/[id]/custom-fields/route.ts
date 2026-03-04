@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { customFieldCreateSchema } from "@/lib/validation/schemas";
@@ -57,17 +56,7 @@ export async function POST(
       throw new ApiError(500, "custom_field_create_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId,
-      actorId: user.id,
-      action: "custom_field_created",
-      metadata: {
-        customFieldId: data.id,
-        name: data.name,
-        fieldType: data.field_type,
-      },
-    });
-
+    
     return ok(data, { status: 201 });
   } catch (error) {
     return fail(error as Error);

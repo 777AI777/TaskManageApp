@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { boardPatchSchema } from "@/lib/validation/schemas";
@@ -21,7 +20,6 @@ export async function PATCH(
     if (payload.color !== undefined) updatePayload.color = payload.color;
     if (payload.slug !== undefined) updatePayload.slug = payload.slug;
     if (payload.visibility !== undefined) updatePayload.visibility = payload.visibility;
-    if (payload.dashboardTiles !== undefined) updatePayload.dashboard_tiles = payload.dashboardTiles;
     if (payload.isArchived !== undefined) updatePayload.is_archived = payload.isArchived;
     updatePayload.updated_at = new Date().toISOString();
 
@@ -35,13 +33,7 @@ export async function PATCH(
       throw new ApiError(500, "board_update_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId: id,
-      actorId: user.id,
-      action: "board_updated",
-      metadata: payload,
-    });
-
+    
     return ok(data);
   } catch (error) {
     return fail(error as Error);
@@ -95,13 +87,7 @@ export async function DELETE(
       throw new ApiError(500, "board_archive_failed", boardArchiveError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: id,
-      actorId: user.id,
-      action: "board_archived",
-      metadata: { archived: true },
-    });
-
+    
     return ok({ id, archived: true });
   } catch (error) {
     return fail(error as Error);

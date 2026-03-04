@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  buildCardPatchExecutionPlan,
-  buildCardUpdatedActivityMetadata,
-} from "@/lib/card-patch-plan";
+import { buildCardPatchExecutionPlan } from "@/lib/card-patch-plan";
 
 describe("buildCardPatchExecutionPlan", () => {
   it("does not require relation lookups for lightweight field updates", () => {
@@ -49,24 +46,5 @@ describe("buildCardPatchExecutionPlan", () => {
     expect(plan.shouldUpdateAssignees).toBe(true);
     expect(plan.shouldNotifyAssignees).toBe(true);
     expect(plan.shouldResolveWorkspace).toBe(true);
-  });
-});
-
-describe("buildCardUpdatedActivityMetadata", () => {
-  it("keeps only changed relation arrays in metadata", () => {
-    const payload = {
-      title: "New title",
-      assigneeIds: ["user-1"],
-      labelIds: ["label-1"],
-    };
-    const metadata = buildCardUpdatedActivityMetadata(payload, {
-      shouldUpdateAssignees: true,
-      shouldUpdateLabels: false,
-    });
-
-    expect(metadata).toEqual({
-      title: "New title",
-      assigneeIds: ["user-1"],
-    });
   });
 });

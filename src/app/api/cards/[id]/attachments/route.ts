@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { attachmentCreateSchema } from "@/lib/validation/schemas";
@@ -46,14 +45,7 @@ export async function POST(
       throw new ApiError(500, "attachment_create_failed", attachmentError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: id,
-      actorId: user.id,
-      action: "attachment_added",
-      metadata: { attachmentId: attachment.id, name: attachment.name },
-    });
-
+    
     return ok(attachment, { status: 201 });
   } catch (error) {
     return fail(error as Error);

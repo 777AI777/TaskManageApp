@@ -3,7 +3,7 @@ export type BoardRole = "workspace_admin" | "board_admin" | "member";
 
 export const BOARD_VISIBILITY_LABELS: Record<BoardVisibility, string> = {
   private: "非公開",
-  workspace: "ワークスペース内",
+  workspace: "ワークスペース",
   public: "公開",
 };
 
@@ -15,7 +15,7 @@ export const BOARD_ROLE_LABELS: Record<BoardRole, string> = {
 
 export const BOARD_COMMON_LABELS = {
   boardName: "ボード名",
-  boardNameEdit: "ボード名を変更",
+  boardNameEdit: "ボード名を編集",
   boards: "ボード",
   workspace: "ワークスペース",
   noDescription: "説明はありません。",
@@ -29,10 +29,9 @@ export const BOARD_ERROR_MESSAGES = {
   createList: "リストの作成に失敗しました。",
   createCard: "カードの作成に失敗しました。",
   archiveList: "リストのアーカイブに失敗しました。",
-  updateBoardVisibility: "公開範囲の更新に失敗しました。",
+  updateBoardVisibility: "公開設定の更新に失敗しました。",
   boardNameTooShort: "ボード名は2文字以上で入力してください。",
   renameBoard: "ボード名の変更に失敗しました。",
-  updateDashboardTiles: "ダッシュボードの更新に失敗しました。",
   moveCard: "カードの移動に失敗しました。",
 } as const;
 
@@ -43,7 +42,6 @@ export const CARD_DETAIL_ERROR_MESSAGES = {
   saveMembers: "メンバーの保存に失敗しました。",
   saveLabels: "ラベルの保存に失敗しました。",
   saveDates: "日付の保存に失敗しました。",
-  saveLocation: "場所の保存に失敗しました。",
   updateCustomFields: "カスタムフィールドの更新に失敗しました。",
   updateWatchState: "ウォッチ状態の更新に失敗しました。",
   updateCompletion: "完了状態の更新に失敗しました。",

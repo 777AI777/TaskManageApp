@@ -88,7 +88,7 @@ async function getPrivateBoardBundle({
     supabase.from("workspaces").select("id, name, slug").eq("id", workspaceId).maybeSingle(),
     supabase
       .from("boards")
-      .select("id, name, slug, description, color, visibility, dashboard_tiles")
+      .select("id, name, slug, description, color, visibility")
       .eq("id", boardId)
       .eq("is_archived", false)
       .maybeSingle(),
@@ -189,7 +189,6 @@ async function getPrivateBoardBundle({
       description: board.description,
       color: board.color,
       visibility: board.visibility,
-      dashboard_tiles: (board.dashboard_tiles ?? []) as BoardDataBundle["board"]["dashboard_tiles"],
     },
     lists: (lists ?? []) as BoardDataBundle["lists"],
     cards: (cards ?? []) as BoardDataBundle["cards"],

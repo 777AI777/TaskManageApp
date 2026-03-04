@@ -90,7 +90,6 @@ export default async function BoardPage({
         checklists={publicBundle.checklists}
         checklistItems={publicBundle.checklistItems}
         attachments={publicBundle.attachments}
-        activities={publicBundle.activities}
         customFields={publicBundle.customFields}
         cardCustomFieldValues={publicBundle.cardCustomFieldValues}
       />
@@ -143,7 +142,7 @@ async function getPrivateBoardBundle({
     supabase.from("workspaces").select("id, name, slug").eq("id", workspaceId).maybeSingle(),
     supabase
       .from("boards")
-      .select("id, name, slug, description, color, visibility, dashboard_tiles")
+      .select("id, name, slug, description, color, visibility")
       .eq("id", boardId)
       .eq("is_archived", false)
       .maybeSingle(),
@@ -244,7 +243,6 @@ async function getPrivateBoardBundle({
       description: board.description,
       color: board.color,
       visibility: board.visibility,
-      dashboard_tiles: (board.dashboard_tiles ?? []) as BoardDataBundle["board"]["dashboard_tiles"],
     },
     lists: (lists ?? []) as BoardDataBundle["lists"],
     cards: (cards ?? []) as BoardDataBundle["cards"],
@@ -266,7 +264,7 @@ async function getPublicBoardBundle(
   supabase: Awaited<ReturnType<typeof getServerAuth>>["supabase"],
   boardId: string,
 ) {
-  const [{ data: lists }, { data: cards }, { data: labels }, { data: customFields }, { data: activities }] =
+  const [{ data: lists }, { data: cards }, { data: labels }, { data: customFields }] =
     await Promise.all([
       supabase
         .from("lists")
@@ -282,11 +280,6 @@ async function getPublicBoardBundle(
         .order("position"),
       supabase.from("labels").select("id, name, color").eq("board_id", boardId),
       supabase.from("custom_fields").select("id, name, field_type, options, position").eq("board_id", boardId),
-      supabase
-        .from("activities")
-        .select("id, card_id, action, created_at")
-        .eq("board_id", boardId)
-        .order("created_at", { ascending: false }),
     ]);
 
   const cardIds = (cards ?? []).map((card) => card.id);
@@ -367,7 +360,6 @@ async function getPublicBoardBundle(
     cards: cards ?? [],
     labels: labels ?? [],
     customFields: customFields ?? [],
-    activities: activities ?? [],
     checklists: checklists ?? [],
     comments: comments ?? [],
     attachments: attachments ?? [],

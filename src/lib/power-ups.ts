@@ -10,32 +10,27 @@ export const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
   {
     key: "custom-fields",
     displayName: "Custom Fields",
-    description: "カードに任意フィールドを追加します。",
+    description: "Add custom fields to cards.",
   },
   {
     key: "card-aging",
     displayName: "Card Aging",
-    description: "更新のないカードを視覚的に強調します。",
+    description: "Highlight cards that have not been updated recently.",
   },
   {
     key: "voting",
     displayName: "Voting",
-    description: "カード投票を有効化します。",
-  },
-  {
-    key: "map",
-    displayName: "Map",
-    description: "位置情報付きカードを地図で表示します。",
+    description: "Let members vote on cards.",
   },
   {
     key: "calendar",
     displayName: "Calendar",
-    description: "期限日をカレンダー表示します。",
+    description: "Display cards in calendar view.",
   },
   {
     key: "automation",
     displayName: "Automation",
-    description: "ルール自動化(Butler相当)を有効化します。",
+    description: "Run automation rules for board events.",
   },
 ];
 
@@ -47,7 +42,12 @@ export function resolvePowerUpDisplayName(key: string) {
 
 export function mergePowerUps(
   boardId: string,
-  rows: Array<Pick<BoardPowerUp, "id" | "board_id" | "power_up_key" | "display_name" | "is_enabled" | "config" | "created_by" | "created_at" | "updated_at">>,
+  rows: Array<
+    Pick<
+      BoardPowerUp,
+      "id" | "board_id" | "power_up_key" | "display_name" | "is_enabled" | "config" | "created_by" | "created_at" | "updated_at"
+    >
+  >,
   createdBy: string,
 ): BoardPowerUp[] {
   const rowMap = new Map(rows.map((row) => [row.power_up_key, row]));
@@ -67,6 +67,7 @@ export function mergePowerUps(
         updated_at: row.updated_at,
       };
     }
+
     const now = new Date().toISOString();
     return {
       id: `virtual-${definition.key}`,

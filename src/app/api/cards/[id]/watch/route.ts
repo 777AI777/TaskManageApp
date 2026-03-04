@@ -2,7 +2,6 @@ import { z } from "zod";
 
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 
@@ -63,14 +62,7 @@ export async function POST(
       }
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: id,
-      actorId: user.id,
-      action: nextWatch ? "card_watching_started" : "card_watching_stopped",
-      metadata: { watching: nextWatch },
-    });
-
+    
     return ok({ cardId: id, watching: nextWatch });
   } catch (error) {
     return fail(error as Error);

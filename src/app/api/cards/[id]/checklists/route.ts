@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { checklistCreateSchema } from "@/lib/validation/schemas";
@@ -51,14 +50,7 @@ export async function POST(
       throw new ApiError(500, "checklist_create_failed", checklistError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: id,
-      actorId: user.id,
-      action: "checklist_created",
-      metadata: { checklistId: checklist.id },
-    });
-
+    
     return ok(checklist, { status: 201 });
   } catch (error) {
     return fail(error as Error);

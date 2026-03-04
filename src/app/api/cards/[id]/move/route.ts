@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { runAutomationForEvent } from "@/lib/automation/engine";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
@@ -62,18 +61,7 @@ export async function POST(
       .eq("card_id", id);
     const { data: labels } = await supabase.from("card_labels").select("label_id").eq("card_id", id);
 
-    await logActivity(supabase, {
-      boardId: movedCard.board_id,
-      cardId: movedCard.id,
-      actorId: user.id,
-      action: "card_moved",
-      metadata: {
-        fromListId: card.list_id,
-        toListId: payload.listId,
-        position: payload.position,
-      },
-    });
-
+    
     await runAutomationForEvent(supabase, {
       trigger: "card_moved",
       workspaceId: board.workspace_id,

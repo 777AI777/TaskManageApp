@@ -1,26 +1,11 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { createNotification, logActivity } from "@/lib/activity";
+import { createNotification } from "@/lib/activity";
 import { runAutomationForEvent } from "@/lib/automation/engine";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { ensurePosition } from "@/lib/utils";
 import { cardCreateSchema } from "@/lib/validation/schemas";
-
-const LOCATION_COLUMNS = ["location_name", "location_lat", "location_lng"] as const;
-
-function hasMissingLocationColumnError(message: string | undefined) {
-  if (!message?.includes("schema cache")) return false;
-  return LOCATION_COLUMNS.some((column) => message.includes(`'${column}' column`));
-}
-
-function omitLocationColumns(payload: Record<string, unknown>) {
-  const nextPayload = { ...payload };
-  for (const column of LOCATION_COLUMNS) {
-    delete nextPayload[column];
-  }
-  return nextPayload;
-}
 
 export async function POST(request: Request) {
   try {
@@ -52,25 +37,12 @@ export async function POST(request: Request) {
       start_at: payload.startAt ?? null,
       created_by: user.id,
     };
-    if (payload.locationName !== undefined) insertPayload.location_name = payload.locationName;
-    if (payload.locationLat !== undefined) insertPayload.location_lat = payload.locationLat;
-    if (payload.locationLng !== undefined) insertPayload.location_lng = payload.locationLng;
 
-    let { data: card, error: cardError } = await supabase
+    const { data: card, error: cardError } = await supabase
       .from("cards")
       .insert(insertPayload)
       .select("*")
       .single();
-
-    if (cardError && hasMissingLocationColumnError(cardError.message)) {
-      const fallbackResult = await supabase
-        .from("cards")
-        .insert(omitLocationColumns(insertPayload))
-        .select("*")
-        .single();
-      card = fallbackResult.data;
-      cardError = fallbackResult.error;
-    }
 
     if (cardError) {
       throw new ApiError(500, "card_create_failed", cardError.message);
@@ -101,16 +73,7 @@ export async function POST(request: Request) {
       }
     }
 
-    await logActivity(supabase, {
-      boardId: payload.boardId,
-      cardId: card.id,
-      actorId: user.id,
-      action: "card_created",
-      metadata: {
-        listId: payload.listId,
-      },
-    });
-
+    
     for (const assigneeId of payload.assigneeIds ?? []) {
       if (assigneeId === user.id) {
         continue;

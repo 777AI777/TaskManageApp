@@ -168,7 +168,10 @@ function CalendarDayCell({
       } ${isOver ? "tm-calendar-cell-over" : ""}`}
       style={{ minHeight }}
     >
-      <div className="tm-calendar-date-label">{day.getDate()}\u65e5</div>
+      <div className="tm-calendar-date-label">
+        {day.getDate()}
+        {"\u65e5"}
+      </div>
     </article>
   );
 }

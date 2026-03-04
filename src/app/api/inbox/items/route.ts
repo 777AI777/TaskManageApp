@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertWorkspaceRole } from "@/lib/permissions";
 import { ensurePosition } from "@/lib/utils";
@@ -67,13 +66,7 @@ export async function POST(request: Request) {
     }
 
     if (data.board_id) {
-      await logActivity(supabase, {
-        boardId: data.board_id,
-        actorId: user.id,
-        action: "inbox_item_created",
-        metadata: { inboxItemId: data.id },
-      });
-    }
+          }
 
     return ok(data, { status: 201 });
   } catch (error) {
@@ -119,13 +112,7 @@ export async function PATCH(request: Request) {
     }
 
     if (currentItem.board_id) {
-      await logActivity(supabase, {
-        boardId: currentItem.board_id,
-        actorId: user.id,
-        action: "inbox_item_updated",
-        metadata: { inboxItemId: payload.id },
-      });
-    }
+          }
 
     return ok(data);
   } catch (error) {

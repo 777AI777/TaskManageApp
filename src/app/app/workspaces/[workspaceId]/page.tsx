@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 
 import { CreateBoardForm } from "@/components/workspace/create-board-form";
 import { InviteMemberForm } from "@/components/workspace/invite-member-form";
-import { MyTaskAppImportForm } from "@/components/workspace/myTaskApp-import-form";
 import { requireServerUser } from "@/lib/auth";
 import { BOARD_ROLE_LABELS, BOARD_COMMON_LABELS } from "@/lib/board-ui-text";
 import { assertWorkspaceRole } from "@/lib/permissions";
@@ -204,10 +203,9 @@ export default async function WorkspaceDetailPage({
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-3">
+      <div className="grid gap-4 xl:grid-cols-2">
         <CreateBoardForm workspaceId={workspaceId} templates={templates ?? []} />
         <InviteMemberForm workspaceId={workspaceId} />
-        <MyTaskAppImportForm workspaceId={workspaceId} />
       </div>
     </main>
   );

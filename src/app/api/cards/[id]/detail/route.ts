@@ -30,22 +30,23 @@ export async function GET(
       { data: comments, error: commentsError },
       { data: checklists, error: checklistsError },
       { data: attachments, error: attachmentsError },
-      { data: activities, error: activitiesError },
     ] = await Promise.all([
       supabase.from("card_watchers").select("user_id").eq("card_id", id),
-      supabase.from("comments").select("*").eq("card_id", id).order("created_at"),
-      supabase.from("checklists").select("*").eq("card_id", id).order("position"),
+      supabase
+        .from("comments")
+        .select("id, card_id, user_id, content, created_at")
+        .eq("card_id", id)
+        .order("created_at"),
+      supabase
+        .from("checklists")
+        .select("id, card_id, title, position")
+        .eq("card_id", id)
+        .order("position"),
       supabase
         .from("attachments")
-        .select("*")
+        .select("id, card_id, name, storage_path, mime_type, size_bytes, preview_url, created_at")
         .eq("card_id", id)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("activities")
-        .select("*")
-        .eq("card_id", id)
-        .order("created_at", { ascending: false })
-        .limit(200),
     ]);
 
     if (watcherError) {
@@ -60,15 +61,12 @@ export async function GET(
     if (attachmentsError) {
       throw new ApiError(500, "attachment_lookup_failed", attachmentsError.message);
     }
-    if (activitiesError) {
-      throw new ApiError(500, "activity_lookup_failed", activitiesError.message);
-    }
 
     const checklistIds = (checklists ?? []).map((checklist) => checklist.id);
     const { data: checklistItems, error: checklistItemsError } = checklistIds.length
       ? await supabase
           .from("checklist_items")
-          .select("*")
+          .select("id, checklist_id, content, is_completed, position, assignee_id, due_at, completed_by, completed_at")
           .in("checklist_id", checklistIds)
           .order("position")
       : { data: [], error: null };
@@ -83,7 +81,6 @@ export async function GET(
       checklists: checklists ?? [],
       checklistItems: checklistItems ?? [],
       attachments: attachments ?? [],
-      activities: activities ?? [],
     });
   } catch (error) {
     return fail(error as Error);

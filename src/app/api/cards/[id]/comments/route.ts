@@ -1,6 +1,6 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { createNotification, logActivity } from "@/lib/activity";
+import { createNotification } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { commentCreateSchema } from "@/lib/validation/schemas";
@@ -58,14 +58,7 @@ export async function POST(
       throw new ApiError(500, "comment_create_failed", commentError.message);
     }
 
-    await logActivity(supabase, {
-      boardId: card.board_id,
-      cardId: id,
-      actorId: user.id,
-      action: "comment_created",
-      metadata: { commentId: comment.id },
-    });
-
+    
     const { data: assignees } = await supabase
       .from("card_assignees")
       .select("user_id")

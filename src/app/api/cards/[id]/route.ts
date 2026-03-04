@@ -1,29 +1,13 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { createNotification, logActivity } from "@/lib/activity";
+import { createNotification } from "@/lib/activity";
 import { runAutomationForEvent } from "@/lib/automation/engine";
 import {
   buildCardPatchExecutionPlan,
-  buildCardUpdatedActivityMetadata,
 } from "@/lib/card-patch-plan";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { cardPatchSchema } from "@/lib/validation/schemas";
-
-const LOCATION_COLUMNS = ["location_name", "location_lat", "location_lng"] as const;
-
-function hasMissingLocationColumnError(message: string | undefined) {
-  if (!message?.includes("schema cache")) return false;
-  return LOCATION_COLUMNS.some((column) => message.includes(`'${column}' column`));
-}
-
-function omitLocationColumns(payload: Record<string, unknown>) {
-  const nextPayload = { ...payload };
-  for (const column of LOCATION_COLUMNS) {
-    delete nextPayload[column];
-  }
-  return nextPayload;
-}
 
 export async function PATCH(
   request: Request,
@@ -64,31 +48,17 @@ export async function PATCH(
     if (payload.coverColor !== undefined) updatePayload.cover_color = payload.coverColor;
     if (payload.coverType !== undefined) updatePayload.cover_type = payload.coverType;
     if (payload.coverValue !== undefined) updatePayload.cover_value = payload.coverValue;
-    if (payload.locationName !== undefined) updatePayload.location_name = payload.locationName;
-    if (payload.locationLat !== undefined) updatePayload.location_lat = payload.locationLat;
-    if (payload.locationLng !== undefined) updatePayload.location_lng = payload.locationLng;
     if (payload.isCompleted !== undefined) {
       updatePayload.is_completed = payload.isCompleted;
       updatePayload.completed_at = payload.isCompleted ? new Date().toISOString() : null;
     }
 
-    let { data: updatedCard, error: cardUpdateError } = await supabase
+    const { data: updatedCard, error: cardUpdateError } = await supabase
       .from("cards")
       .update(updatePayload)
       .eq("id", id)
       .select("*")
       .single();
-
-    if (cardUpdateError && hasMissingLocationColumnError(cardUpdateError.message)) {
-      const fallbackResult = await supabase
-        .from("cards")
-        .update(omitLocationColumns(updatePayload))
-        .eq("id", id)
-        .select("*")
-        .single();
-      updatedCard = fallbackResult.data;
-      cardUpdateError = fallbackResult.error;
-    }
 
     if (cardUpdateError) {
       throw new ApiError(500, "card_update_failed", cardUpdateError.message);
@@ -208,16 +178,6 @@ export async function PATCH(
         });
       }
     }
-
-    const activityMetadata = buildCardUpdatedActivityMetadata(payload, executionPlan);
-
-    await logActivity(supabase, {
-      boardId: updatedCard.board_id,
-      cardId: updatedCard.id,
-      actorId: user.id,
-      action: "card_updated",
-      metadata: activityMetadata,
-    });
 
     return ok(updatedCard);
   } catch (error) {

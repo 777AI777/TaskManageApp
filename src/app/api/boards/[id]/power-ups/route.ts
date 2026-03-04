@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { resolvePowerUpDisplayName } from "@/lib/power-ups";
@@ -40,6 +39,10 @@ export async function PUT(
     const { supabase, user } = await requireApiUser();
     await assertBoardRole(supabase, boardId, user.id, ["board_admin"]);
 
+    if (payload.powerUpKey === "map") {
+      throw new ApiError(400, "board_power_up_unsupported", "Map power-up is no longer supported.");
+    }
+
     const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("board_power_ups")
@@ -62,15 +65,7 @@ export async function PUT(
       throw new ApiError(500, "board_power_up_upsert_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId,
-      actorId: user.id,
-      action: payload.isEnabled ? "power_up_enabled" : "power_up_disabled",
-      metadata: {
-        powerUpKey: payload.powerUpKey,
-      },
-    });
-
+    
     return ok(data);
   } catch (error) {
     return fail(error as Error);

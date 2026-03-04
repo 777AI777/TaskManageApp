@@ -7,7 +7,7 @@ import { requireServerUser } from "@/lib/auth";
 import { getHomeDataForUser } from "@/lib/home";
 
 export const dynamic = "force-dynamic";
-const UNIFIED_BOARD_BACKGROUND = "#c0c5d1";
+const UNIFIED_BOARD_BACKGROUND = "#ffffff";
 
 function getBoardThumbStyle(): CSSProperties {
   return { background: UNIFIED_BOARD_BACKGROUND };

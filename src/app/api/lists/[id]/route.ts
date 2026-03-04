@@ -1,6 +1,5 @@
 import { requireApiUser } from "@/lib/auth";
 import { parseBody } from "@/lib/api";
-import { logActivity } from "@/lib/activity";
 import { ApiError, fail, ok } from "@/lib/http";
 import { assertBoardRole } from "@/lib/permissions";
 import { listPatchSchema } from "@/lib/validation/schemas";
@@ -45,13 +44,7 @@ export async function PATCH(
       throw new ApiError(500, "list_update_failed", error.message);
     }
 
-    await logActivity(supabase, {
-      boardId: currentList.board_id,
-      actorId: user.id,
-      action: "list_updated",
-      metadata: { listId: id, ...payload },
-    });
-
+    
     return ok(data);
   } catch (error) {
     return fail(error as Error);
