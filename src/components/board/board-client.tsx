@@ -37,7 +37,16 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CSSProperties, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CSSProperties,
+  FormEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { CalendarView } from "@/components/board/calendar-view";
 import { BoardChatPanel } from "@/components/board/board-chat-panel";
@@ -68,9 +77,20 @@ import {
   booleanLabel,
 } from "@/lib/board-ui-text";
 import {
+  removeRealtimeAttachment,
   removeRealtimeCard,
+  removeRealtimeCardWatcher,
+  removeRealtimeChecklist,
+  removeRealtimeChecklistItem,
+  removeRealtimeChecklistItemsByChecklist,
+  removeRealtimeComment,
   removeRealtimeList,
+  upsertRealtimeAttachment,
   upsertRealtimeCard,
+  upsertRealtimeCardWatcher,
+  upsertRealtimeChecklist,
+  upsertRealtimeChecklistItem,
+  upsertRealtimeComment,
   upsertRealtimeList,
 } from "@/lib/board-realtime";
 import {
@@ -86,6 +106,11 @@ import {
 } from "@/lib/board-utils";
 import { resolveAvatarColor } from "@/lib/avatar-color";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import {
+  clampSharedSidebarWidth,
+  readSharedSidebarWidthFromStorage,
+  writeSharedSidebarWidthToStorage,
+} from "@/lib/sidebar-width";
 import {
   applyTableSortStateToSearchParams,
   getNextTableSortState,
@@ -112,6 +137,10 @@ type MemberFilters = {
   unassigned: boolean;
   assignedToMe: boolean;
   memberIds: string[];
+};
+const DEFAULT_TABLE_SORT_STATE: Exclude<TableSortState, null> = {
+  key: "taskId",
+  direction: "asc",
 };
 type StatusFilters = CardStatusFilters;
 type ListFilters = CardListFilters;
@@ -162,6 +191,8 @@ const VIEW_MENU_ITEMS: ViewMenuItem[] = [
   { mode: "calendar", label: "\u30ab\u30ec\u30f3\u30c0\u30fc", icon: Calendar },
   { mode: "timeline", label: "\u30ac\u30f3\u30c8\u30c1\u30e3\u30fc\u30c8", icon: GitBranch },
 ];
+const BOARD_LEFT_RAIL_DEFAULT_WIDTH_PX = 320;
+const BOARD_LEFT_RAIL_COLLAPSED_WIDTH_PX = 64;
 const LIST_COLUMN_DND_PREFIX = "list-column:";
 const LIST_REORDER_ERROR_MESSAGE = "Failed to reorder list.";
 const BOARD_CHAT_PAGE_SIZE = 50;
@@ -778,6 +809,7 @@ export function BoardClient({
   }, []);
   const viewPickerRef = useRef<HTMLDivElement | null>(null);
   const headerTaskAddRef = useRef<HTMLDivElement | null>(null);
+  const leftRailBodyRef = useRef<HTMLDivElement | null>(null);
   const timelineDragStartXRef = useRef<number | null>(null);
   const timelineDragSnapshotRef = useRef<TimelineDragSnapshot | null>(null);
 
@@ -829,6 +861,8 @@ export function BoardClient({
           : "board";
   const [viewMode, setViewMode] = useState<ViewMode>(defaultView);
   const [leftRailCollapsed, setLeftRailCollapsed] = useState(initialData.preferences?.left_rail_collapsed ?? false);
+  const [leftRailWidth, setLeftRailWidth] = useState<number>(BOARD_LEFT_RAIL_DEFAULT_WIDTH_PX);
+  const [leftRailResizing, setLeftRailResizing] = useState(false);
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [showListComposer, setShowListComposer] = useState(false);
   const [showViewPicker, setShowViewPicker] = useState(false);
@@ -859,6 +893,8 @@ export function BoardClient({
   const [activeCardId, setActiveCardId] = useState<string | null>(initialCardId);
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const leftRailWidthRef = useRef(leftRailWidth);
+  const leftRailResizeStartRef = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
 
   const canManageBoardUi = canManageBoard(initialData.currentUser.role);
   const currentUserId = initialData.currentUser.id;
@@ -877,6 +913,17 @@ export function BoardClient({
   const selectedCard = activeCardId ? cards.find((card) => card.id === activeCardId) ?? null : null;
   const selectedCardId = selectedCard?.id ?? null;
   const selectedCardDetailLoading = selectedCard ? Boolean(cardDetailLoadingById[selectedCard.id]) : false;
+  const selectedCardChecklistIds = useMemo(() => {
+    if (!selectedCardId) return [];
+    return checklists
+      .filter((checklist) => checklist.card_id === selectedCardId)
+      .map((checklist) => checklist.id)
+      .sort();
+  }, [checklists, selectedCardId]);
+  const selectedCardChecklistIdsKey = useMemo(
+    () => selectedCardChecklistIds.join(","),
+    [selectedCardChecklistIds],
+  );
 
   useEffect(() => {
     setActiveCardId(initialCardId ?? null);
@@ -898,6 +945,73 @@ export function BoardClient({
   useEffect(() => {
     checklistsRef.current = checklists;
   }, [checklists]);
+
+  useEffect(() => {
+    leftRailWidthRef.current = leftRailWidth;
+  }, [leftRailWidth]);
+
+  useEffect(() => {
+    const displayWidth = leftRailCollapsed ? BOARD_LEFT_RAIL_COLLAPSED_WIDTH_PX : leftRailWidth;
+    leftRailBodyRef.current?.style.setProperty("--app-sidebar-width", `${displayWidth}px`);
+  }, [leftRailCollapsed, leftRailWidth]);
+
+  useEffect(() => {
+    const storedWidth = readSharedSidebarWidthFromStorage();
+    if (storedWidth !== null) {
+      setLeftRailWidth(storedWidth);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!leftRailCollapsed) return;
+    leftRailResizeStartRef.current = null;
+    setLeftRailResizing(false);
+  }, [leftRailCollapsed]);
+
+  useEffect(() => {
+    if (!leftRailResizing) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      const resizeStart = leftRailResizeStartRef.current;
+      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      const nextWidth = clampSharedSidebarWidth(resizeStart.width + (event.clientX - resizeStart.clientX), window.innerWidth);
+      leftRailWidthRef.current = nextWidth;
+      leftRailBodyRef.current?.style.setProperty("--app-sidebar-width", `${nextWidth}px`);
+    }
+
+    function handlePointerEnd(event: PointerEvent) {
+      const resizeStart = leftRailResizeStartRef.current;
+      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      leftRailResizeStartRef.current = null;
+      setLeftRailResizing(false);
+      setLeftRailWidth(leftRailWidthRef.current);
+      writeSharedSidebarWidthToStorage(leftRailWidthRef.current);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerEnd);
+    window.addEventListener("pointercancel", handlePointerEnd);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerEnd);
+      window.removeEventListener("pointercancel", handlePointerEnd);
+    };
+  }, [leftRailResizing]);
+
+  const handleLeftRailResizerPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLButtonElement>) => {
+      if (leftRailCollapsed || event.button !== 0) return;
+      event.preventDefault();
+      leftRailResizeStartRef.current = {
+        pointerId: event.pointerId,
+        clientX: event.clientX,
+        width: leftRailWidthRef.current,
+      };
+      setLeftRailResizing(true);
+    },
+    [leftRailCollapsed],
+  );
 
   useEffect(() => {
     if (!sortedLists.length) {
@@ -1102,6 +1216,7 @@ export function BoardClient({
       sortedCustomFields.map((field) => field.id),
     );
   }, [searchParamsString, sortedCustomFields]);
+  const effectiveTableSortState = tableSortState ?? DEFAULT_TABLE_SORT_STATE;
 
   const tableCustomFieldColumns = useMemo(
     () => sortedCustomFields.map((field) => ({ id: field.id, name: field.name })),
@@ -1137,10 +1252,7 @@ export function BoardClient({
   );
 
   const sortedTableCards = useMemo(() => {
-    if (!tableSortState) {
-      return baseTableCards;
-    }
-    const activeSortState: Exclude<TableSortState, null> = tableSortState;
+    const activeSortState = effectiveTableSortState;
 
     const baseOrderByCardId = new Map(baseTableCards.map((card, index) => [card.id, index]));
     const customFieldId = activeSortState.key.startsWith("custom:")
@@ -1204,11 +1316,11 @@ export function BoardClient({
     baseTableCards,
     customFieldById,
     customFieldValueByCardAndField,
+    effectiveTableSortState,
     labelIdsByCard,
     labelNameById,
     listNameById,
     memberNameById,
-    tableSortState,
   ]);
 
   const tableRows = useMemo(() => {
@@ -1334,13 +1446,281 @@ export function BoardClient({
 
   useEffect(() => {
     if (!selectedCardId) return;
+    const channel = supabase.channel(
+      `card-detail-sync:${initialData.board.id}:${selectedCardId}:${selectedCardChecklistIdsKey || "none"}`,
+    );
 
-    const timer = window.setInterval(() => {
-      void fetchCardDetail(selectedCardId, { force: true });
-    }, 10_000);
+    channel
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "comments",
+          filter: `card_id=eq.${selectedCardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedComment = payload.old as Partial<CardComment>;
+            if (!removedComment.id) return;
+            setComments((current) => removeRealtimeComment(current, removedComment.id as string));
+            return;
+          }
+
+          const nextComment = payload.new as Partial<CardComment>;
+          if (
+            typeof nextComment.id !== "string" ||
+            typeof nextComment.card_id !== "string" ||
+            typeof nextComment.user_id !== "string" ||
+            typeof nextComment.content !== "string" ||
+            typeof nextComment.created_at !== "string"
+          ) {
+            return;
+          }
+          const nextCommentId = nextComment.id;
+          const nextCommentCardId = nextComment.card_id;
+          const nextCommentUserId = nextComment.user_id;
+          const nextCommentContent = nextComment.content;
+          const nextCommentCreatedAt = nextComment.created_at;
+          setComments((current) =>
+            upsertRealtimeComment(current, {
+              id: nextCommentId,
+              card_id: nextCommentCardId,
+              user_id: nextCommentUserId,
+              content: nextCommentContent,
+              created_at: nextCommentCreatedAt,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "checklists",
+          filter: `card_id=eq.${selectedCardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedChecklist = payload.old as Partial<Checklist>;
+            if (!removedChecklist.id) return;
+            setChecklists((current) => removeRealtimeChecklist(current, removedChecklist.id as string));
+            setChecklistItems((current) =>
+              removeRealtimeChecklistItemsByChecklist(current, removedChecklist.id as string),
+            );
+            return;
+          }
+
+          const nextChecklist = payload.new as Partial<Checklist>;
+          if (
+            typeof nextChecklist.id !== "string" ||
+            typeof nextChecklist.card_id !== "string" ||
+            typeof nextChecklist.title !== "string" ||
+            typeof nextChecklist.position !== "number"
+          ) {
+            return;
+          }
+          const nextChecklistId = nextChecklist.id;
+          const nextChecklistCardId = nextChecklist.card_id;
+          const nextChecklistTitle = nextChecklist.title;
+          const nextChecklistPosition = nextChecklist.position;
+          setChecklists((current) =>
+            upsertRealtimeChecklist(current, {
+              id: nextChecklistId,
+              card_id: nextChecklistCardId,
+              title: nextChecklistTitle,
+              position: nextChecklistPosition,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "attachments",
+          filter: `card_id=eq.${selectedCardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedAttachment = payload.old as Partial<Attachment>;
+            if (!removedAttachment.id) return;
+            setAttachments((current) => removeRealtimeAttachment(current, removedAttachment.id as string));
+            return;
+          }
+
+          const nextAttachment = payload.new as Partial<Attachment>;
+          if (
+            typeof nextAttachment.id !== "string" ||
+            typeof nextAttachment.card_id !== "string" ||
+            typeof nextAttachment.name !== "string" ||
+            typeof nextAttachment.storage_path !== "string" ||
+            typeof nextAttachment.mime_type !== "string" ||
+            typeof nextAttachment.size_bytes !== "number" ||
+            typeof nextAttachment.created_at !== "string"
+          ) {
+            return;
+          }
+          const nextAttachmentId = nextAttachment.id;
+          const nextAttachmentCardId = nextAttachment.card_id;
+          const nextAttachmentName = nextAttachment.name;
+          const nextAttachmentStoragePath = nextAttachment.storage_path;
+          const nextAttachmentMimeType = nextAttachment.mime_type;
+          const nextAttachmentSizeBytes = nextAttachment.size_bytes;
+          const nextAttachmentCreatedAt = nextAttachment.created_at;
+          const nextAttachmentPreviewUrl =
+            typeof nextAttachment.preview_url === "string" ? nextAttachment.preview_url : null;
+          setAttachments((current) =>
+            upsertRealtimeAttachment(current, {
+              id: nextAttachmentId,
+              card_id: nextAttachmentCardId,
+              name: nextAttachmentName,
+              storage_path: nextAttachmentStoragePath,
+              mime_type: nextAttachmentMimeType,
+              size_bytes: nextAttachmentSizeBytes,
+              preview_url: nextAttachmentPreviewUrl,
+              created_at: nextAttachmentCreatedAt,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "card_watchers",
+          filter: `card_id=eq.${selectedCardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedWatcher = payload.old as Partial<CardWatcher>;
+            const hasWatcherIdentifier =
+              Boolean(removedWatcher.id) ||
+              (Boolean(removedWatcher.card_id) && Boolean(removedWatcher.user_id));
+            setCardWatchers((current) =>
+              removeRealtimeCardWatcher(current, {
+                id: typeof removedWatcher.id === "string" ? removedWatcher.id : undefined,
+                card_id: typeof removedWatcher.card_id === "string" ? removedWatcher.card_id : undefined,
+                user_id: typeof removedWatcher.user_id === "string" ? removedWatcher.user_id : undefined,
+              }),
+            );
+            if (!hasWatcherIdentifier) {
+              void fetchCardDetail(selectedCardId, { force: true });
+            }
+            return;
+          }
+
+          const nextWatcher = payload.new as Partial<CardWatcher>;
+          if (typeof nextWatcher.card_id !== "string" || typeof nextWatcher.user_id !== "string") return;
+          const nextWatcherCardId = nextWatcher.card_id;
+          const nextWatcherUserId = nextWatcher.user_id;
+          const nextWatcherId = typeof nextWatcher.id === "string" ? nextWatcher.id : undefined;
+          const nextWatcherCreatedAt =
+            typeof nextWatcher.created_at === "string" ? nextWatcher.created_at : undefined;
+          setCardWatchers((current) =>
+            upsertRealtimeCardWatcher(current, {
+              id: nextWatcherId,
+              card_id: nextWatcherCardId,
+              user_id: nextWatcherUserId,
+              created_at: nextWatcherCreatedAt,
+            }),
+          );
+        },
+      );
+
+    selectedCardChecklistIds.forEach((checklistId) => {
+      channel.on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "checklist_items",
+          filter: `checklist_id=eq.${checklistId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedItem = payload.old as Partial<ChecklistItem>;
+            if (!removedItem.id) return;
+            setChecklistItems((current) => removeRealtimeChecklistItem(current, removedItem.id as string));
+            return;
+          }
+
+          const nextItem = payload.new as Partial<ChecklistItem>;
+          if (
+            typeof nextItem.id !== "string" ||
+            typeof nextItem.checklist_id !== "string" ||
+            typeof nextItem.content !== "string" ||
+            typeof nextItem.is_completed !== "boolean" ||
+            typeof nextItem.position !== "number"
+          ) {
+            return;
+          }
+          const nextItemId = nextItem.id;
+          const nextItemChecklistId = nextItem.checklist_id;
+          const nextItemContent = nextItem.content;
+          const nextItemIsCompleted = nextItem.is_completed;
+          const nextItemPosition = nextItem.position;
+          const nextItemAssigneeId = typeof nextItem.assignee_id === "string" ? nextItem.assignee_id : null;
+          const nextItemDueAt = typeof nextItem.due_at === "string" ? nextItem.due_at : null;
+          const nextItemCompletedBy = typeof nextItem.completed_by === "string" ? nextItem.completed_by : null;
+          const nextItemCompletedAt = typeof nextItem.completed_at === "string" ? nextItem.completed_at : null;
+          setChecklistItems((current) =>
+            upsertRealtimeChecklistItem(current, {
+              id: nextItemId,
+              checklist_id: nextItemChecklistId,
+              content: nextItemContent,
+              is_completed: nextItemIsCompleted,
+              position: nextItemPosition,
+              assignee_id: nextItemAssigneeId,
+              due_at: nextItemDueAt,
+              completed_by: nextItemCompletedBy,
+              completed_at: nextItemCompletedAt,
+            }),
+          );
+        },
+      );
+    });
+
+    channel.subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [
+    fetchCardDetail,
+    initialData.board.id,
+    selectedCardChecklistIds,
+    selectedCardChecklistIdsKey,
+    selectedCardId,
+    supabase,
+  ]);
+
+  useEffect(() => {
+    if (!selectedCardId) return;
+    const activeSelectedCardId = selectedCardId;
+
+    function syncSelectedCardDetail() {
+      void fetchCardDetail(activeSelectedCardId, { force: true });
+    }
+
+    function handleFocus() {
+      syncSelectedCardDetail();
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        syncSelectedCardDetail();
+      }
+    }
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.clearInterval(timer);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [fetchCardDetail, selectedCardId]);
 
@@ -1851,7 +2231,7 @@ export function BoardClient({
   }
 
   function handleTableSort(sortKey: TableSortKey) {
-    const nextSortState = getNextTableSortState(tableSortState, sortKey);
+    const nextSortState = getNextTableSortState(effectiveTableSortState, sortKey);
     const nextParams = applyTableSortStateToSearchParams(
       new URLSearchParams(searchParamsString),
       nextSortState,
@@ -2456,8 +2836,20 @@ export function BoardClient({
         </div>
       </header>
 
-      <div className="tm-body">
-        <aside className={`tm-left-rail ${leftRailCollapsed ? "w-16" : "w-80"}`}>
+      <div
+        className="tm-body"
+        ref={leftRailBodyRef}
+        style={
+          {
+            "--app-sidebar-width": `${
+              leftRailCollapsed ? BOARD_LEFT_RAIL_COLLAPSED_WIDTH_PX : leftRailWidth
+            }px`,
+          } as CSSProperties
+        }
+      >
+        <aside
+          className={`tm-left-rail ${leftRailResizing ? "tm-left-rail-resizing" : ""}`}
+        >
           <div className="mb-3 flex items-center justify-between">
             {!leftRailCollapsed ? <h2 className="text-lg font-bold">{BOARD_COMMON_LABELS.workspace}</h2> : null}
             <button
@@ -2542,6 +2934,16 @@ export function BoardClient({
             </div>
           ) : null}
         </aside>
+        <button
+          className={`app-sidebar-resizer ${leftRailResizing ? "app-sidebar-resizer-active" : ""} ${
+            leftRailCollapsed ? "app-sidebar-resizer-disabled" : ""
+          }`}
+          type="button"
+          aria-label="サイドバー幅を調整"
+          aria-orientation="vertical"
+          disabled={leftRailCollapsed}
+          onPointerDown={handleLeftRailResizerPointerDown}
+        />
 
         <section className="tm-main-view">
           <div className="tm-board-header">
@@ -2925,7 +3327,7 @@ export function BoardClient({
                   labels={tableLabels}
                   members={tableMembers}
                   savingByCardId={tableSavingByCardId}
-                  sortState={tableSortState}
+                  sortState={effectiveTableSortState}
                   onSort={handleTableSort}
                   onSelectCard={openCard}
                   onListChange={handleTableListChange}

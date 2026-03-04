@@ -241,7 +241,8 @@ body {
 
 .myTaskApp-home-content {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  position: relative;
+  grid-template-columns: var(--app-sidebar-width, 280px) minmax(0, 1fr);
   min-height: calc(100vh - 51px);
 }
 
@@ -377,6 +378,7 @@ body {
 }
 
 .myTaskApp-home-main {
+  grid-column: 2;
   padding: 20px;
 }
 
@@ -618,6 +620,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .myTaskApp-home-content .app-sidebar-resizer {
+    display: none;
+  }
+
+  .myTaskApp-home-main {
+    grid-column: 1;
+  }
+
   .myTaskApp-home-dashboard {
     grid-template-columns: 1fr;
   }
@@ -649,7 +659,8 @@ body {
 
 .tm-body {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  position: relative;
+  grid-template-columns: var(--app-sidebar-width, 320px) minmax(0, 1fr);
   min-height: calc(100vh - 58px);
 }
 
@@ -663,6 +674,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.tm-left-rail-resizing {
+  transition: none;
 }
 
 .tm-left-rail-content {
@@ -679,7 +694,64 @@ body {
   padding-right: 2px;
 }
 
+.app-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--app-sidebar-width, 280px) - 1px);
+  z-index: 4;
+  width: 2px;
+  min-width: 2px;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.app-sidebar-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: #9da9ba;
+  transition: background-color 120ms ease;
+}
+
+.app-sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -8px;
+  right: -8px;
+}
+
+.app-sidebar-resizer:hover::before,
+.app-sidebar-resizer-active::before {
+  background: #6f7f96;
+}
+
+.app-sidebar-resizer:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(12 102 228 / 26%);
+}
+
+.app-sidebar-resizer-disabled {
+  display: none;
+  pointer-events: none;
+}
+
+.app-sidebar-resizer-disabled::before {
+  display: none;
+}
+
 .tm-main-view {
+  grid-column: 2;
   position: relative;
   margin: 10px;
   border-radius: 14px;
@@ -3073,7 +3145,12 @@ body {
     display: none;
   }
 
+  .tm-body .app-sidebar-resizer {
+    display: none;
+  }
+
   .tm-main-view {
+    grid-column: 1;
     margin: 8px;
     padding: 8px;
   }
