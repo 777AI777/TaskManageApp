@@ -894,7 +894,7 @@ export function BoardClient({
   const [shareLinkCopied, setShareLinkCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const leftRailWidthRef = useRef(leftRailWidth);
-  const leftRailResizeStartRef = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
+  const leftRailResizeStartRef = useRef<{ clientX: number; width: number } | null>(null);
 
   const canManageBoardUi = canManageBoard(initialData.currentUser.role);
   const currentUserId = initialData.currentUser.id;
@@ -973,15 +973,15 @@ export function BoardClient({
 
     function handlePointerMove(event: PointerEvent) {
       const resizeStart = leftRailResizeStartRef.current;
-      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      if (!resizeStart) return;
       const nextWidth = clampSharedSidebarWidth(resizeStart.width + (event.clientX - resizeStart.clientX), window.innerWidth);
       leftRailWidthRef.current = nextWidth;
       leftRailBodyRef.current?.style.setProperty("--app-sidebar-width", `${nextWidth}px`);
     }
 
-    function handlePointerEnd(event: PointerEvent) {
+    function handlePointerEnd() {
       const resizeStart = leftRailResizeStartRef.current;
-      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      if (!resizeStart) return;
       leftRailResizeStartRef.current = null;
       setLeftRailResizing(false);
       setLeftRailWidth(leftRailWidthRef.current);
@@ -1004,7 +1004,6 @@ export function BoardClient({
       if (leftRailCollapsed || event.button !== 0) return;
       event.preventDefault();
       leftRailResizeStartRef.current = {
-        pointerId: event.pointerId,
         clientX: event.clientX,
         width: leftRailWidthRef.current,
       };

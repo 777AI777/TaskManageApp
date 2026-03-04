@@ -63,7 +63,7 @@ export function MyTaskAppHomeShell({
   const [homeSidebarResizing, setHomeSidebarResizing] = useState(false);
   const homeContentRef = useRef<HTMLDivElement | null>(null);
   const homeSidebarWidthRef = useRef(homeSidebarWidth);
-  const homeSidebarResizeStartRef = useRef<{ pointerId: number; clientX: number; width: number } | null>(null);
+  const homeSidebarResizeStartRef = useRef<{ clientX: number; width: number } | null>(null);
 
   useEffect(() => {
     homeSidebarWidthRef.current = homeSidebarWidth;
@@ -85,15 +85,15 @@ export function MyTaskAppHomeShell({
 
     function handlePointerMove(event: PointerEvent) {
       const resizeStart = homeSidebarResizeStartRef.current;
-      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      if (!resizeStart) return;
       const nextWidth = clampSharedSidebarWidth(resizeStart.width + (event.clientX - resizeStart.clientX), window.innerWidth);
       homeSidebarWidthRef.current = nextWidth;
       homeContentRef.current?.style.setProperty("--app-sidebar-width", `${nextWidth}px`);
     }
 
-    function handlePointerEnd(event: PointerEvent) {
+    function handlePointerEnd() {
       const resizeStart = homeSidebarResizeStartRef.current;
-      if (!resizeStart || event.pointerId !== resizeStart.pointerId) return;
+      if (!resizeStart) return;
       homeSidebarResizeStartRef.current = null;
       setHomeSidebarResizing(false);
       setHomeSidebarWidth(homeSidebarWidthRef.current);
@@ -115,7 +115,6 @@ export function MyTaskAppHomeShell({
     if (event.button !== 0) return;
     event.preventDefault();
     homeSidebarResizeStartRef.current = {
-      pointerId: event.pointerId,
       clientX: event.clientX,
       width: homeSidebarWidthRef.current,
     };
