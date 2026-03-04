@@ -3,7 +3,14 @@
 import { formatDistanceToNowStrict } from "date-fns";
 import { ja } from "date-fns/locale";
 import { ChevronDown, ChevronUp, Loader2, Send } from "lucide-react";
-import { KeyboardEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { BoardChatMessage, BoardMember } from "@/components/board/board-types";
 import { resolveAvatarColor } from "@/lib/avatar-color";
@@ -92,7 +99,7 @@ export function BoardChatPanel({
       }
     }
 
-    function handleEscape(event: KeyboardEvent) {
+    function handleEscape(event: globalThis.KeyboardEvent) {
       if (event.key === "Escape") {
         setOpenMenuMessageId(null);
         setMenuPosition(null);
@@ -118,7 +125,7 @@ export function BoardChatPanel({
     }
   }
 
-  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submitMessage();
