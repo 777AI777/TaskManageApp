@@ -1532,6 +1532,66 @@ export function BoardClient({
       .on(
         "postgres_changes",
         {
+          event: "DELETE",
+          schema: "public",
+          table: "comments",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedComment = payload.old as Partial<CardComment>;
+          if (!removedComment.id) return;
+          setComments((current) => removeRealtimeComment(current, removedComment.id as string));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "checklists",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedChecklist = payload.old as Partial<Checklist>;
+          if (!removedChecklist.id) return;
+          setChecklists((current) => removeRealtimeChecklist(current, removedChecklist.id as string));
+          setChecklistItems((current) =>
+            removeRealtimeChecklistItemsByChecklist(current, removedChecklist.id as string),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "attachments",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedAttachment = payload.old as Partial<Attachment>;
+          if (!removedAttachment.id) return;
+          setAttachments((current) => removeRealtimeAttachment(current, removedAttachment.id as string));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "card_watchers",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedWatcher = payload.old as Partial<CardWatcher>;
+          setCardWatchers((current) =>
+            removeRealtimeCardWatcher(current, {
+              id: typeof removedWatcher.id === "string" ? removedWatcher.id : undefined,
+              card_id: typeof removedWatcher.card_id === "string" ? removedWatcher.card_id : undefined,
+              user_id: typeof removedWatcher.user_id === "string" ? removedWatcher.user_id : undefined,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
           event: "*",
           schema: "public",
           table: "comments",
@@ -1709,6 +1769,20 @@ export function BoardClient({
         },
       );
 
+    channel.on(
+      "postgres_changes",
+      {
+        event: "DELETE",
+        schema: "public",
+        table: "checklist_items",
+      },
+      (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+        const removedItem = payload.old as Partial<ChecklistItem>;
+        if (!removedItem.id) return;
+        setChecklistItems((current) => removeRealtimeChecklistItem(current, removedItem.id as string));
+      },
+    );
+
     selectedCardChecklistIds.forEach((checklistId) => {
       channel.on(
         "postgres_changes",
@@ -1858,6 +1932,87 @@ export function BoardClient({
 
     const channel = supabase
       .channel(`board-sync:${boardId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "cards",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedCard = payload.old as Partial<BoardCard>;
+          if (!removedCard.id) return;
+
+          setCards((current) => removeRealtimeCard(current, removedCard.id as string));
+          loadedCardDetailRef.current.delete(removedCard.id);
+          applyCardDetailData(removedCard.id, {
+            watchers: [],
+            comments: [],
+            checklists: [],
+            checklistItems: [],
+            attachments: [],
+          });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "lists",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedList = payload.old as Partial<BoardList>;
+          if (!removedList.id) return;
+          setLists((current) => removeRealtimeList(current, removedList.id as string));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "labels",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedLabel = payload.old as Partial<Label>;
+          if (typeof removedLabel.id !== "string") return;
+          setLabels((current) => removeRealtimeLabel(current, removedLabel.id as string));
+          setCardLabels((current) =>
+            current.filter((cardLabel) => cardLabel.label_id !== (removedLabel.id as string)),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "custom_fields",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedField = payload.old as Partial<CustomField>;
+          if (typeof removedField.id !== "string") return;
+          setCustomFields((current) => removeRealtimeCustomField(current, removedField.id as string));
+          setCardCustomFieldValues((current) =>
+            current.filter((value) => value.custom_field_id !== (removedField.id as string)),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "board_chat_messages",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          const removedMessage = payload.old as Partial<BoardChatMessage>;
+          if (!removedMessage.id) return;
+          setBoardChatMessages((current) => current.filter((message) => message.id !== removedMessage.id));
+          setBoardChatDeletingIds((current) => current.filter((id) => id !== removedMessage.id));
+        },
+      )
       .on(
         "postgres_changes",
         {
