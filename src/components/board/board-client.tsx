@@ -209,11 +209,18 @@ const BOARD_LEFT_RAIL_COLLAPSED_WIDTH_PX = 64;
 const LIST_COLUMN_DND_PREFIX = "list-column:";
 const LIST_REORDER_ERROR_MESSAGE = "Failed to reorder list.";
 const BOARD_CHAT_PAGE_SIZE = 50;
+const REALTIME_SYNC_RECOVERY_ERROR_MESSAGE = "リアルタイム同期が不安定なため、最新状態を再取得しています。";
+const DETAIL_SYNC_RETRY_INTERVAL_MS = 3_000;
 
 type BoardChatPageData = {
   messages: BoardChatMessage[];
   hasMore: boolean;
   nextBefore: string | null;
+};
+
+type PatchCardResult = {
+  card: BoardCard;
+  requestSequence: number;
 };
 
 function getListColumnDndId(listId: string): string {
@@ -389,6 +396,10 @@ function upsertBoardChatMessage(messages: BoardChatMessage[], nextMessage: Board
   const next = [...messages];
   next[index] = nextMessage;
   return next.sort(compareBoardChatMessage);
+}
+
+function isRealtimeChannelUnhealthy(status: string): boolean {
+  return status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED";
 }
 
 function areStringArraysEqual(left: string[], right: string[]): boolean {
@@ -855,6 +866,10 @@ export function BoardClient({
   const loadedCardDetailRef = useRef(new Set<string>());
   const boardCardIdsRef = useRef(new Set(initialData.cards.map((card) => card.id)));
   const checklistsRef = useRef<Checklist[]>([]);
+  const selectedCardIdRef = useRef<string | null>(initialCardId ?? null);
+  const latestPatchSequenceByCardRef = useRef<Record<string, number>>({});
+  const previousSelectedCardIdRef = useRef<string | null>(null);
+  const previousSelectedCardChecklistIdsKeyByCardRef = useRef<Record<string, string>>({});
 
   const [boardName, setBoardName] = useState(initialData.board.name);
   const [boardSlug, setBoardSlug] = useState(initialData.board.slug);
@@ -943,6 +958,10 @@ export function BoardClient({
 
   useEffect(() => {
     setShareLinkCopied(false);
+  }, [selectedCardId]);
+
+  useEffect(() => {
+    selectedCardIdRef.current = selectedCardId;
   }, [selectedCardId]);
 
   useEffect(() => {
@@ -1455,12 +1474,56 @@ export function BoardClient({
   );
 
   useEffect(() => {
-    if (!selectedCardId) return;
-    void fetchCardDetail(selectedCardId);
+    if (!selectedCardId) {
+      previousSelectedCardIdRef.current = null;
+      return;
+    }
+
+    const previousSelectedCardId = previousSelectedCardIdRef.current;
+    previousSelectedCardIdRef.current = selectedCardId;
+    if (previousSelectedCardId !== selectedCardId) {
+      void fetchCardDetail(selectedCardId, { force: true });
+    }
   }, [fetchCardDetail, selectedCardId]);
 
   useEffect(() => {
     if (!selectedCardId) return;
+
+    const previousChecklistIdsKey = previousSelectedCardChecklistIdsKeyByCardRef.current[selectedCardId];
+    previousSelectedCardChecklistIdsKeyByCardRef.current[selectedCardId] = selectedCardChecklistIdsKey;
+    if (previousChecklistIdsKey !== undefined && previousChecklistIdsKey !== selectedCardChecklistIdsKey) {
+      void fetchCardDetail(selectedCardId, { force: true });
+    }
+  }, [fetchCardDetail, selectedCardChecklistIdsKey, selectedCardId]);
+
+  useEffect(() => {
+    if (!selectedCardId) return;
+    const activeSelectedCardId = selectedCardId;
+    let disposed = false;
+    let retryTimerId: number | null = null;
+
+    function stopRetry() {
+      if (retryTimerId !== null) {
+        window.clearInterval(retryTimerId);
+        retryTimerId = null;
+      }
+    }
+
+    function triggerRecovery() {
+      if (disposed) return;
+
+      setError((current) =>
+        current === REALTIME_SYNC_RECOVERY_ERROR_MESSAGE ? current : REALTIME_SYNC_RECOVERY_ERROR_MESSAGE,
+      );
+      void fetchCardDetail(activeSelectedCardId, { force: true });
+
+      if (retryTimerId !== null) return;
+      retryTimerId = window.setInterval(() => {
+        if (disposed) return;
+        void fetchCardDetail(activeSelectedCardId, { force: true });
+      }, DETAIL_SYNC_RETRY_INTERVAL_MS);
+    }
+
     const channel = supabase.channel(
       `card-detail-sync:${initialData.board.id}:${selectedCardId}:${selectedCardChecklistIdsKey || "none"}`,
     );
@@ -1699,8 +1762,22 @@ export function BoardClient({
       );
     });
 
-    channel.subscribe();
+    channel.subscribe((status) => {
+      if (disposed) return;
+
+      if (status === "SUBSCRIBED") {
+        stopRetry();
+        setError((current) => (current === REALTIME_SYNC_RECOVERY_ERROR_MESSAGE ? null : current));
+        return;
+      }
+
+      if (isRealtimeChannelUnhealthy(status)) {
+        triggerRecovery();
+      }
+    });
     return () => {
+      disposed = true;
+      stopRetry();
       void supabase.removeChannel(channel);
     };
   }, [
@@ -1741,6 +1818,44 @@ export function BoardClient({
 
   useEffect(() => {
     const boardId = initialData.board.id;
+    let disposed = false;
+    let retryTimerId: number | null = null;
+
+    function stopRetry() {
+      if (retryTimerId !== null) {
+        window.clearInterval(retryTimerId);
+        retryTimerId = null;
+      }
+    }
+
+    function forceFetchSelectedCardDetail() {
+      const activeSelectedCardId = selectedCardIdRef.current;
+      if (!activeSelectedCardId) {
+        stopRetry();
+        return;
+      }
+      void fetchCardDetail(activeSelectedCardId, { force: true });
+    }
+
+    function triggerRecovery() {
+      if (disposed) return;
+
+      setError((current) =>
+        current === REALTIME_SYNC_RECOVERY_ERROR_MESSAGE ? current : REALTIME_SYNC_RECOVERY_ERROR_MESSAGE,
+      );
+      forceFetchSelectedCardDetail();
+
+      if (!selectedCardIdRef.current || retryTimerId !== null) return;
+      retryTimerId = window.setInterval(() => {
+        if (disposed) return;
+        if (!selectedCardIdRef.current) {
+          stopRetry();
+          return;
+        }
+        forceFetchSelectedCardDetail();
+      }, DETAIL_SYNC_RETRY_INTERVAL_MS);
+    }
+
     const channel = supabase
       .channel(`board-sync:${boardId}`)
       .on(
@@ -2101,11 +2216,25 @@ export function BoardClient({
         },
       );
 
-    channel.subscribe();
+    channel.subscribe((status) => {
+      if (disposed) return;
+
+      if (status === "SUBSCRIBED") {
+        stopRetry();
+        setError((current) => (current === REALTIME_SYNC_RECOVERY_ERROR_MESSAGE ? null : current));
+        return;
+      }
+
+      if (isRealtimeChannelUnhealthy(status)) {
+        triggerRecovery();
+      }
+    });
     return () => {
+      disposed = true;
+      stopRetry();
       void supabase.removeChannel(channel);
     };
-  }, [applyCardDetailData, initialData.board.id, supabase]);
+  }, [applyCardDetailData, fetchCardDetail, initialData.board.id, supabase]);
 
 
   const boardBackground = useMemo<CSSProperties>(
@@ -2326,12 +2455,17 @@ export function BoardClient({
     );
 
     try {
-      const updated = await patchCard(cardId, {
+      const { card: updated, requestSequence } = await patchCard(cardId, {
         listId,
         startAt,
         dueAt,
       });
-      setCards((current) => current.map((card) => (card.id === updated.id ? updated : card)));
+      setCards((current) => {
+        if ((latestPatchSequenceByCardRef.current[cardId] ?? 0) !== requestSequence) {
+          return current;
+        }
+        return upsertRealtimeCard(current, updated);
+      });
     } catch (error) {
       setCards(previous);
       const message = error instanceof Error ? error.message : BOARD_ERROR_MESSAGES.moveCard;
@@ -2340,7 +2474,10 @@ export function BoardClient({
     }
   }
 
-  async function patchCard(cardId: string, patch: Record<string, unknown>): Promise<BoardCard> {
+  async function patchCard(cardId: string, patch: Record<string, unknown>): Promise<PatchCardResult> {
+    const requestSequence = (latestPatchSequenceByCardRef.current[cardId] ?? 0) + 1;
+    latestPatchSequenceByCardRef.current[cardId] = requestSequence;
+
     const response = await fetch(`/api/cards/${cardId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -2350,7 +2487,10 @@ export function BoardClient({
     if (!response.ok) {
       throw new Error(body?.error?.message ?? BOARD_ERROR_MESSAGES.moveCard);
     }
-    return body.data as BoardCard;
+    return {
+      card: body.data as BoardCard,
+      requestSequence,
+    };
   }
 
   function replaceCardAssignees(cardId: string, nextAssigneeIds: string[]) {
@@ -2388,8 +2528,13 @@ export function BoardClient({
 
     applyOptimistic();
     try {
-      const updated = await patchCard(cardId, patch);
-      setCards((current) => current.map((card) => (card.id === cardId ? updated : card)));
+      const { card: updated, requestSequence } = await patchCard(cardId, patch);
+      setCards((current) => {
+        if ((latestPatchSequenceByCardRef.current[cardId] ?? 0) !== requestSequence) {
+          return current;
+        }
+        return upsertRealtimeCard(current, updated);
+      });
     } catch (error) {
       rollback();
       setError(error instanceof Error ? error.message : fallbackMessage);
@@ -2742,12 +2887,17 @@ export function BoardClient({
           ),
         );
         try {
-          const updated = await patchCard(movingCard.id, {
+          const { card: updated, requestSequence } = await patchCard(movingCard.id, {
             listId: timelineOver.listId,
             startAt: null,
             dueAt: null,
           });
-          setCards((current) => current.map((card) => (card.id === updated.id ? updated : card)));
+          setCards((current) => {
+            if ((latestPatchSequenceByCardRef.current[movingCard.id] ?? 0) !== requestSequence) {
+              return current;
+            }
+            return upsertRealtimeCard(current, updated);
+          });
         } catch (error) {
           setCards(previous);
           setError(error instanceof Error ? error.message : BOARD_ERROR_MESSAGES.moveCard);
@@ -2830,12 +2980,17 @@ export function BoardClient({
       );
 
       try {
-        const updated = await patchCard(movingCard.id, {
+        const { card: updated, requestSequence } = await patchCard(movingCard.id, {
           listId: targetListId,
           startAt: nextStartAt,
           dueAt: nextDueAt,
         });
-        setCards((current) => current.map((card) => (card.id === updated.id ? updated : card)));
+        setCards((current) => {
+          if ((latestPatchSequenceByCardRef.current[movingCard.id] ?? 0) !== requestSequence) {
+            return current;
+          }
+          return upsertRealtimeCard(current, updated);
+        });
       } catch (error) {
         setCards(previous);
         setError(error instanceof Error ? error.message : BOARD_ERROR_MESSAGES.moveCard);
@@ -2915,11 +3070,16 @@ export function BoardClient({
       );
 
       try {
-        const updated = await patchCard(movingCard.id, {
+        const { card: updated, requestSequence } = await patchCard(movingCard.id, {
           startAt: nextStartAt,
           dueAt: nextDueAt,
         });
-        setCards((current) => current.map((card) => (card.id === updated.id ? updated : card)));
+        setCards((current) => {
+          if ((latestPatchSequenceByCardRef.current[movingCard.id] ?? 0) !== requestSequence) {
+            return current;
+          }
+          return upsertRealtimeCard(current, updated);
+        });
       } catch (error) {
         setCards(previous);
         setError(error instanceof Error ? error.message : BOARD_ERROR_MESSAGES.moveCard);
@@ -3796,7 +3956,7 @@ export function BoardClient({
           detailLoading={selectedCardDetailLoading}
           onClose={closeCard}
           onCardPatched={(updatedCard) =>
-            setCards((current) => current.map((value) => (value.id === updatedCard.id ? updatedCard : value)))
+            setCards((current) => upsertRealtimeCard(current, updatedCard))
           }
           onCardRelationshipPatched={(nextAssigneeIds, nextLabelIds) => {
             setCardAssignees((current) => [

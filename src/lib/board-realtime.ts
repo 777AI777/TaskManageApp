@@ -14,6 +14,16 @@ import type {
 } from "@/components/board/board-types";
 
 export function upsertRealtimeCard(current: BoardCard[], nextCard: BoardCard): BoardCard[] {
+  const existingCard = current.find((card) => card.id === nextCard.id);
+  if (existingCard) {
+    const existingUpdatedAt = Date.parse(existingCard.updated_at);
+    const nextUpdatedAt = Date.parse(nextCard.updated_at);
+    const canCompareUpdatedAt = Number.isFinite(existingUpdatedAt) && Number.isFinite(nextUpdatedAt);
+    if (canCompareUpdatedAt && nextUpdatedAt < existingUpdatedAt) {
+      return current;
+    }
+  }
+
   const rest = current.filter((card) => card.id !== nextCard.id);
   if (nextCard.archived) {
     return rest;

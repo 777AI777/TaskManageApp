@@ -211,6 +211,36 @@ describe("realtime reducers", () => {
     expect(removed).toHaveLength(0);
   });
 
+  it("ignores stale card events when updated_at is older than current state", () => {
+    const initial = [
+      createCard({
+        id: "card-1",
+        title: "Newer",
+        updated_at: "2026-03-05T10:00:00.000Z",
+      }),
+    ];
+
+    const stale = upsertRealtimeCard(
+      initial,
+      createCard({
+        id: "card-1",
+        title: "Older",
+        updated_at: "2026-03-05T09:59:59.000Z",
+      }),
+    );
+    expect(stale.find((card) => card.id === "card-1")?.title).toBe("Newer");
+
+    const staleArchived = upsertRealtimeCard(
+      initial,
+      createCard({
+        id: "card-1",
+        archived: true,
+        updated_at: "2026-03-05T09:59:59.000Z",
+      }),
+    );
+    expect(staleArchived.some((card) => card.id === "card-1")).toBe(true);
+  });
+
   it("upserts and removes lists with archived handling", () => {
     const initial = [createList(), createList({ id: "list-2" })];
     const updated = upsertRealtimeList(initial, createList({ id: "list-1", name: "Doing" }));
