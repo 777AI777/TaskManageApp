@@ -6,7 +6,7 @@ import {
 
 export const CARD_DND_PREFIX = "card:";
 export const DEFAULT_DRAG_DISTANCE_PX = 4;
-export const MOBILE_CARD_LONG_PRESS_DELAY_MS = 220;
+export const MOBILE_CARD_LONG_PRESS_DELAY_MS = 2000;
 export const MOBILE_CARD_LONG_PRESS_TOLERANCE_PX = 10;
 
 export function getCardDndId(cardId: string): string {

@@ -1435,12 +1435,6 @@ body {
   touch-action: none;
 }
 
-@media (hover: none) and (pointer: coarse) {
-  .tm-card-draggable {
-    touch-action: manipulation;
-  }
-}
-
 .tm-card-draggable:active {
   cursor: grabbing;
 }
