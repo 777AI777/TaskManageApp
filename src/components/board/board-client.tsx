@@ -8,7 +8,6 @@ import {
   DragEndEvent,
   DragMoveEvent,
   DragStartEvent,
-  PointerSensor,
   rectIntersection,
   useDraggable,
   useDroppable,
@@ -49,6 +48,7 @@ import {
 } from "react";
 
 import { CalendarView } from "@/components/board/calendar-view";
+import { BoardPointerSensor, getCardDndId, parseCardDndId } from "@/components/board/board-dnd";
 import { BoardChatPanel } from "@/components/board/board-chat-panel";
 import { CardDetailDrawer } from "@/components/board/card-detail-drawer";
 import { TableView } from "@/components/board/table-view";
@@ -530,7 +530,7 @@ function DnDCard({
   meta: BoardCardMeta | undefined;
   onOpen: (id: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: `card:${card.id}` });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: getCardDndId(card.id) });
   const style = transform ? { transform: CSS.Translate.toString(transform) } : undefined;
 
   return (
@@ -754,9 +754,7 @@ export function BoardClient({
   const searchParams = useSearchParams();
   const dndContextId = `board-dnd-${initialData.board.id}`;
   const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 4 },
-    }),
+    useSensor(BoardPointerSensor),
   );
   const collisionDetection = useCallback<CollisionDetection>((args) => {
     const activeId = args.active?.id ? String(args.active.id) : "";
@@ -2343,11 +2341,10 @@ export function BoardClient({
     const activeId = event.active?.id ? String(event.active.id) : "";
     const timelineActive = parseTimelineActiveId(activeId);
     const calendarActive = parseCalendarActiveId(activeId);
+    const activeCardId = parseCardDndId(activeId);
 
     setActiveDragCardId(
-      activeId.startsWith("card:")
-        ? activeId.replace("card:", "")
-        : timelineActive?.cardId ?? calendarActive?.cardId ?? null,
+      activeCardId ?? timelineActive?.cardId ?? calendarActive?.cardId ?? null,
     );
 
     timelineDragStartXRef.current = getPointerClientX(event.activatorEvent);
@@ -2651,14 +2648,16 @@ export function BoardClient({
     resetTimelineDragTracking();
     if (!overId) return;
 
-    const overCard = overId.startsWith("card:") ? cards.find((card) => card.id === overId.replace("card:", "")) : null;
+    const overCardId = parseCardDndId(overId);
+    const overCard = overCardId ? cards.find((card) => card.id === overCardId) : null;
     const targetListId =
       overId.startsWith("list:")
         ? overId.replace("list:", "")
         : overListColumnId ?? overCard?.list_id;
-    if (!targetListId || !activeId.startsWith("card:")) return;
+    const activeCardId = parseCardDndId(activeId);
+    if (!targetListId || !activeCardId) return;
 
-    const movingCard = cards.find((card) => card.id === activeId.replace("card:", ""));
+    const movingCard = cards.find((card) => card.id === activeCardId);
     if (!movingCard) return;
     if (overCard && overCard.id === movingCard.id) return;
 
