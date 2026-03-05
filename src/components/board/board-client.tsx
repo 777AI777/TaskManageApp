@@ -56,7 +56,9 @@ import { TimelineView } from "@/components/board/timeline-view";
 import { CreateBoardForm } from "@/components/workspace/create-board-form";
 import { HomeUserMenu } from "@/components/workspace/home-user-menu";
 import type {
+  CardAssignee,
   BoardCard,
+  CardLabel,
   CardComment,
   Checklist,
   ChecklistItem,
@@ -69,6 +71,7 @@ import type {
   BoardChatMessage,
   CustomField,
   BoardCardMeta,
+  Label,
 } from "@/components/board/board-types";
 import {
   BOARD_COMMON_LABELS,
@@ -78,19 +81,29 @@ import {
 } from "@/lib/board-ui-text";
 import {
   removeRealtimeAttachment,
+  removeRealtimeCardAssignee,
+  removeRealtimeCardCustomFieldValue,
+  removeRealtimeCardLabel,
   removeRealtimeCard,
   removeRealtimeCardWatcher,
+  removeRealtimeCustomField,
   removeRealtimeChecklist,
   removeRealtimeChecklistItem,
   removeRealtimeChecklistItemsByChecklist,
   removeRealtimeComment,
+  removeRealtimeLabel,
   removeRealtimeList,
   upsertRealtimeAttachment,
+  upsertRealtimeCardAssignee,
+  upsertRealtimeCardCustomFieldValue,
+  upsertRealtimeCardLabel,
   upsertRealtimeCard,
   upsertRealtimeCardWatcher,
+  upsertRealtimeCustomField,
   upsertRealtimeChecklist,
   upsertRealtimeChecklistItem,
   upsertRealtimeComment,
+  upsertRealtimeLabel,
   upsertRealtimeList,
 } from "@/lib/board-realtime";
 import {
@@ -817,7 +830,7 @@ export function BoardClient({
   const [cardAssignees, setCardAssignees] = useState(initialData.cardAssignees);
   const [cardLabels, setCardLabels] = useState(initialData.cardLabels);
   const [cardWatchers, setCardWatchers] = useState<CardWatcher[]>([]);
-  const [customFields] = useState(initialData.customFields);
+  const [customFields, setCustomFields] = useState(initialData.customFields);
   const [cardCustomFieldValues, setCardCustomFieldValues] = useState(initialData.cardCustomFieldValues);
   const [comments, setComments] = useState<CardComment[]>([]);
   const [checklists, setChecklists] = useState<Checklist[]>([]);
@@ -840,6 +853,7 @@ export function BoardClient({
   const [boardChatDeletingIds, setBoardChatDeletingIds] = useState<string[]>([]);
   const [cardDetailLoadingById, setCardDetailLoadingById] = useState<Record<string, boolean>>({});
   const loadedCardDetailRef = useRef(new Set<string>());
+  const boardCardIdsRef = useRef(new Set(initialData.cards.map((card) => card.id)));
   const checklistsRef = useRef<Checklist[]>([]);
 
   const [boardName, setBoardName] = useState(initialData.board.name);
@@ -939,6 +953,10 @@ export function BoardClient({
   useEffect(() => {
     tableSavingByCardIdRef.current = tableSavingByCardId;
   }, [tableSavingByCardId]);
+
+  useEffect(() => {
+    boardCardIdsRef.current = new Set(cards.map((card) => card.id));
+  }, [cards]);
 
   useEffect(() => {
     checklistsRef.current = checklists;
@@ -1788,6 +1806,271 @@ export function BoardClient({
           if (!nextList.id) return;
           const normalized = nextList as BoardList;
           setLists((current) => upsertRealtimeList(current, normalized));
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "labels",
+          filter: `board_id=eq.${boardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedLabel = payload.old as Partial<Label>;
+            if (typeof removedLabel.id !== "string") return;
+            setLabels((current) => removeRealtimeLabel(current, removedLabel.id as string));
+            setCardLabels((current) =>
+              current.filter((cardLabel) => cardLabel.label_id !== (removedLabel.id as string)),
+            );
+            return;
+          }
+
+          const nextLabel = payload.new as Partial<Label>;
+          if (
+            typeof nextLabel.id !== "string" ||
+            typeof nextLabel.board_id !== "string" ||
+            typeof nextLabel.name !== "string" ||
+            typeof nextLabel.color !== "string"
+          ) {
+            return;
+          }
+          const nextLabelId = nextLabel.id;
+          const nextLabelBoardId = nextLabel.board_id;
+          const nextLabelName = nextLabel.name;
+          const nextLabelColor = nextLabel.color;
+
+          setLabels((current) =>
+            upsertRealtimeLabel(current, {
+              id: nextLabelId,
+              board_id: nextLabelBoardId,
+              name: nextLabelName,
+              color: nextLabelColor,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "custom_fields",
+          filter: `board_id=eq.${boardId}`,
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedField = payload.old as Partial<CustomField>;
+            if (typeof removedField.id !== "string") return;
+            setCustomFields((current) => removeRealtimeCustomField(current, removedField.id as string));
+            setCardCustomFieldValues((current) =>
+              current.filter((value) => value.custom_field_id !== (removedField.id as string)),
+            );
+            return;
+          }
+
+          const nextField = payload.new as Partial<CustomField>;
+          const fieldType = nextField.field_type;
+          if (
+            typeof nextField.id !== "string" ||
+            typeof nextField.board_id !== "string" ||
+            typeof nextField.name !== "string" ||
+            typeof fieldType !== "string" ||
+            typeof nextField.position !== "number" ||
+            typeof nextField.created_by !== "string" ||
+            typeof nextField.created_at !== "string" ||
+            typeof nextField.updated_at !== "string"
+          ) {
+            return;
+          }
+
+          if (
+            fieldType !== "text" &&
+            fieldType !== "number" &&
+            fieldType !== "date" &&
+            fieldType !== "checkbox" &&
+            fieldType !== "select"
+          ) {
+            return;
+          }
+
+          const options = Array.isArray(nextField.options)
+            ? (nextField.options as CustomField["options"])
+            : [];
+          const nextFieldId = nextField.id;
+          const nextFieldBoardId = nextField.board_id;
+          const nextFieldName = nextField.name;
+          const nextFieldPosition = nextField.position;
+          const nextFieldCreatedBy = nextField.created_by;
+          const nextFieldCreatedAt = nextField.created_at;
+          const nextFieldUpdatedAt = nextField.updated_at;
+
+          setCustomFields((current) =>
+            upsertRealtimeCustomField(current, {
+              id: nextFieldId,
+              board_id: nextFieldBoardId,
+              name: nextFieldName,
+              field_type: fieldType,
+              options,
+              position: nextFieldPosition,
+              created_by: nextFieldCreatedBy,
+              created_at: nextFieldCreatedAt,
+              updated_at: nextFieldUpdatedAt,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "card_assignees",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedAssignee = payload.old as Partial<CardAssignee>;
+            const removedCardId =
+              typeof removedAssignee.card_id === "string" ? removedAssignee.card_id : undefined;
+            if (removedCardId && !boardCardIdsRef.current.has(removedCardId)) {
+              return;
+            }
+
+            setCardAssignees((current) =>
+              removeRealtimeCardAssignee(current, {
+                id: typeof removedAssignee.id === "string" ? removedAssignee.id : undefined,
+                card_id: removedCardId,
+                user_id: typeof removedAssignee.user_id === "string" ? removedAssignee.user_id : undefined,
+              }),
+            );
+            return;
+          }
+
+          const nextAssignee = payload.new as Partial<CardAssignee>;
+          if (typeof nextAssignee.card_id !== "string" || typeof nextAssignee.user_id !== "string") {
+            return;
+          }
+          const nextAssigneeCardId = nextAssignee.card_id;
+          const nextAssigneeUserId = nextAssignee.user_id;
+          if (!boardCardIdsRef.current.has(nextAssigneeCardId)) {
+            return;
+          }
+
+          setCardAssignees((current) =>
+            upsertRealtimeCardAssignee(current, {
+              id: typeof nextAssignee.id === "string" ? nextAssignee.id : undefined,
+              card_id: nextAssigneeCardId,
+              user_id: nextAssigneeUserId,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "card_labels",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedLabel = payload.old as Partial<CardLabel>;
+            const removedCardId = typeof removedLabel.card_id === "string" ? removedLabel.card_id : undefined;
+            if (removedCardId && !boardCardIdsRef.current.has(removedCardId)) {
+              return;
+            }
+
+            setCardLabels((current) =>
+              removeRealtimeCardLabel(current, {
+                id: typeof removedLabel.id === "string" ? removedLabel.id : undefined,
+                card_id: removedCardId,
+                label_id: typeof removedLabel.label_id === "string" ? removedLabel.label_id : undefined,
+              }),
+            );
+            return;
+          }
+
+          const nextLabel = payload.new as Partial<CardLabel>;
+          if (typeof nextLabel.card_id !== "string" || typeof nextLabel.label_id !== "string") {
+            return;
+          }
+          const nextCardLabelCardId = nextLabel.card_id;
+          const nextCardLabelId = nextLabel.label_id;
+          if (!boardCardIdsRef.current.has(nextCardLabelCardId)) {
+            return;
+          }
+
+          setCardLabels((current) =>
+            upsertRealtimeCardLabel(current, {
+              id: typeof nextLabel.id === "string" ? nextLabel.id : undefined,
+              card_id: nextCardLabelCardId,
+              label_id: nextCardLabelId,
+            }),
+          );
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "card_custom_field_values",
+        },
+        (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => {
+          if (payload.eventType === "DELETE") {
+            const removedValue = payload.old as Partial<CardCustomFieldValue>;
+            const removedCardId =
+              typeof removedValue.card_id === "string" ? removedValue.card_id : undefined;
+            if (removedCardId && !boardCardIdsRef.current.has(removedCardId)) {
+              return;
+            }
+
+            setCardCustomFieldValues((current) =>
+              removeRealtimeCardCustomFieldValue(current, {
+                id: typeof removedValue.id === "string" ? removedValue.id : undefined,
+                card_id: removedCardId,
+                custom_field_id:
+                  typeof removedValue.custom_field_id === "string" ? removedValue.custom_field_id : undefined,
+              }),
+            );
+            return;
+          }
+
+          const nextValue = payload.new as Partial<CardCustomFieldValue>;
+          if (
+            typeof nextValue.id !== "string" ||
+            typeof nextValue.card_id !== "string" ||
+            typeof nextValue.custom_field_id !== "string" ||
+            typeof nextValue.created_at !== "string" ||
+            typeof nextValue.updated_at !== "string"
+          ) {
+            return;
+          }
+          const nextValueId = nextValue.id;
+          const nextValueCardId = nextValue.card_id;
+          const nextValueCustomFieldId = nextValue.custom_field_id;
+          const nextValueCreatedAt = nextValue.created_at;
+          const nextValueUpdatedAt = nextValue.updated_at;
+          if (!boardCardIdsRef.current.has(nextValueCardId)) {
+            return;
+          }
+
+          setCardCustomFieldValues((current) =>
+            upsertRealtimeCardCustomFieldValue(current, {
+              id: nextValueId,
+              card_id: nextValueCardId,
+              custom_field_id: nextValueCustomFieldId,
+              value_text: typeof nextValue.value_text === "string" ? nextValue.value_text : null,
+              value_number: typeof nextValue.value_number === "number" ? nextValue.value_number : null,
+              value_date: typeof nextValue.value_date === "string" ? nextValue.value_date : null,
+              value_boolean:
+                typeof nextValue.value_boolean === "boolean" ? nextValue.value_boolean : null,
+              value_option: typeof nextValue.value_option === "string" ? nextValue.value_option : null,
+              created_at: nextValueCreatedAt,
+              updated_at: nextValueUpdatedAt,
+            }),
+          );
         },
       )
       .on(

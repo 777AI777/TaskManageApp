@@ -44,11 +44,13 @@ export type BoardCardMeta = {
 };
 
 export type CardAssignee = {
+  id?: string;
   card_id: string;
   user_id: string;
 };
 
 export type CardLabel = {
+  id?: string;
   card_id: string;
   label_id: string;
 };
@@ -234,4 +236,3 @@ export type CardDetailData = {
   checklistItems: ChecklistItem[];
   attachments: Attachment[];
 };
-

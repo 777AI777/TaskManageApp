@@ -4,26 +4,41 @@ import type {
   Attachment,
   BoardCard,
   BoardList,
+  CardAssignee,
   CardComment,
+  CardCustomFieldValue,
+  CardLabel,
   CardWatcher,
   Checklist,
   ChecklistItem,
+  CustomField,
+  Label,
 } from "@/components/board/board-types";
 import {
   removeRealtimeAttachment,
+  removeRealtimeCardAssignee,
+  removeRealtimeCardCustomFieldValue,
+  removeRealtimeCardLabel,
   removeRealtimeCard,
   removeRealtimeCardWatcher,
+  removeRealtimeCustomField,
   removeRealtimeChecklist,
   removeRealtimeChecklistItem,
   removeRealtimeChecklistItemsByChecklist,
   removeRealtimeComment,
+  removeRealtimeLabel,
   removeRealtimeList,
   upsertRealtimeAttachment,
+  upsertRealtimeCardAssignee,
+  upsertRealtimeCardCustomFieldValue,
+  upsertRealtimeCardLabel,
   upsertRealtimeCard,
   upsertRealtimeCardWatcher,
+  upsertRealtimeCustomField,
   upsertRealtimeChecklist,
   upsertRealtimeChecklistItem,
   upsertRealtimeComment,
+  upsertRealtimeLabel,
   upsertRealtimeList,
 } from "@/lib/board-realtime";
 
@@ -124,6 +139,65 @@ function createWatcher(overrides?: Partial<CardWatcher>): CardWatcher {
   };
 }
 
+function createCardAssignee(overrides?: Partial<CardAssignee>): CardAssignee {
+  return {
+    id: "assignee-1",
+    card_id: "card-1",
+    user_id: "user-1",
+    ...overrides,
+  };
+}
+
+function createCardLabel(overrides?: Partial<CardLabel>): CardLabel {
+  return {
+    id: "card-label-1",
+    card_id: "card-1",
+    label_id: "label-1",
+    ...overrides,
+  };
+}
+
+function createCardCustomFieldValue(overrides?: Partial<CardCustomFieldValue>): CardCustomFieldValue {
+  return {
+    id: "cfv-1",
+    card_id: "card-1",
+    custom_field_id: "field-1",
+    value_text: "hello",
+    value_number: null,
+    value_date: null,
+    value_boolean: null,
+    value_option: null,
+    created_at: "2026-03-05T00:00:00.000Z",
+    updated_at: "2026-03-05T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function createLabel(overrides?: Partial<Label>): Label {
+  return {
+    id: "label-1",
+    board_id: "board-1",
+    name: "Backend",
+    color: "#579dff",
+    ...overrides,
+  };
+}
+
+function createCustomField(overrides?: Partial<CustomField>): CustomField {
+  return {
+    id: "field-1",
+    board_id: "board-1",
+    name: "Estimate",
+    field_type: "number",
+    options: [],
+    position: 1000,
+    created_by: "user-1",
+    created_at: "2026-03-05T00:00:00.000Z",
+    updated_at: "2026-03-05T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("realtime reducers", () => {
   it("upserts and removes cards with archived handling", () => {
     const initial = [createCard(), createCard({ id: "card-2" })];
@@ -219,5 +293,88 @@ describe("realtime reducers", () => {
     ] as CardWatcher[];
     const removedByPair = removeRealtimeCardWatcher(withPairOnly, { card_id: "card-1", user_id: "user-3" });
     expect(removedByPair).toEqual([{ card_id: "card-1", user_id: "user-4" }]);
+  });
+
+  it("upserts and removes card assignees by id or card/user pair", () => {
+    const initial = [createCardAssignee(), createCardAssignee({ id: "assignee-2", user_id: "user-2" })];
+    const updatedById = upsertRealtimeCardAssignee(
+      initial,
+      createCardAssignee({ id: "assignee-1", user_id: "user-3" }),
+    );
+    expect(updatedById.find((item) => item.id === "assignee-1")?.user_id).toBe("user-3");
+
+    const updatedByPair = upsertRealtimeCardAssignee(
+      updatedById,
+      createCardAssignee({ id: undefined, card_id: "card-1", user_id: "user-2" }),
+    );
+    expect(updatedByPair).toHaveLength(2);
+    expect(updatedByPair.find((item) => item.user_id === "user-2")?.id).toBe("assignee-2");
+
+    const removedById = removeRealtimeCardAssignee(updatedByPair, { id: "assignee-2" });
+    expect(removedById).toHaveLength(1);
+
+    const removedByPair = removeRealtimeCardAssignee(removedById, { card_id: "card-1", user_id: "user-3" });
+    expect(removedByPair).toHaveLength(0);
+  });
+
+  it("upserts and removes card labels by id or card/label pair", () => {
+    const initial = [createCardLabel(), createCardLabel({ id: "card-label-2", label_id: "label-2" })];
+    const updatedById = upsertRealtimeCardLabel(initial, createCardLabel({ id: "card-label-1", label_id: "label-3" }));
+    expect(updatedById.find((item) => item.id === "card-label-1")?.label_id).toBe("label-3");
+
+    const updatedByPair = upsertRealtimeCardLabel(
+      updatedById,
+      createCardLabel({ id: undefined, card_id: "card-1", label_id: "label-2" }),
+    );
+    expect(updatedByPair).toHaveLength(2);
+    expect(updatedByPair.find((item) => item.label_id === "label-2")?.id).toBe("card-label-2");
+
+    const removedById = removeRealtimeCardLabel(updatedByPair, { id: "card-label-2" });
+    expect(removedById).toHaveLength(1);
+
+    const removedByPair = removeRealtimeCardLabel(removedById, { card_id: "card-1", label_id: "label-3" });
+    expect(removedByPair).toHaveLength(0);
+  });
+
+  it("upserts and removes card custom field values by id and card/field pair", () => {
+    const initial = [
+      createCardCustomFieldValue(),
+      createCardCustomFieldValue({ id: "cfv-2", custom_field_id: "field-2", value_text: "second" }),
+    ];
+    const updatedById = upsertRealtimeCardCustomFieldValue(
+      initial,
+      createCardCustomFieldValue({ id: "cfv-1", value_text: "updated" }),
+    );
+    expect(updatedById.find((item) => item.id === "cfv-1")?.value_text).toBe("updated");
+
+    const updatedByPair = upsertRealtimeCardCustomFieldValue(
+      updatedById,
+      createCardCustomFieldValue({ id: "cfv-3", card_id: "card-1", custom_field_id: "field-2", value_text: "pair" }),
+    );
+    expect(updatedByPair).toHaveLength(2);
+    expect(updatedByPair.find((item) => item.custom_field_id === "field-2")?.id).toBe("cfv-3");
+
+    const removedById = removeRealtimeCardCustomFieldValue(updatedByPair, { id: "cfv-3" });
+    expect(removedById).toHaveLength(1);
+
+    const removedByPair = removeRealtimeCardCustomFieldValue(removedById, {
+      card_id: "card-1",
+      custom_field_id: "field-1",
+    });
+    expect(removedByPair).toHaveLength(0);
+  });
+
+  it("upserts and removes labels and custom fields by id", () => {
+    const labels = [createLabel(), createLabel({ id: "label-2", name: "Frontend" })];
+    const updatedLabels = upsertRealtimeLabel(labels, createLabel({ id: "label-1", name: "API" }));
+    expect(updatedLabels.find((item) => item.id === "label-1")?.name).toBe("API");
+    const removedLabels = removeRealtimeLabel(updatedLabels, "label-2");
+    expect(removedLabels.map((item) => item.id)).toEqual(["label-1"]);
+
+    const fields = [createCustomField(), createCustomField({ id: "field-2", name: "Severity" })];
+    const updatedFields = upsertRealtimeCustomField(fields, createCustomField({ id: "field-1", name: "SP" }));
+    expect(updatedFields.find((item) => item.id === "field-1")?.name).toBe("SP");
+    const removedFields = removeRealtimeCustomField(updatedFields, "field-2");
+    expect(removedFields.map((item) => item.id)).toEqual(["field-1"]);
   });
 });

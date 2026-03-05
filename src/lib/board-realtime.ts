@@ -2,10 +2,15 @@ import type {
   Attachment,
   BoardCard,
   BoardList,
+  CardAssignee,
   CardComment,
+  CardCustomFieldValue,
+  CardLabel,
   CardWatcher,
   Checklist,
   ChecklistItem,
+  CustomField,
+  Label,
 } from "@/components/board/board-types";
 
 export function upsertRealtimeCard(current: BoardCard[], nextCard: BoardCard): BoardCard[] {
@@ -96,6 +101,179 @@ export function upsertRealtimeAttachment(current: Attachment[], nextAttachment: 
 
 export function removeRealtimeAttachment(current: Attachment[], attachmentId: string): Attachment[] {
   return current.filter((attachment) => attachment.id !== attachmentId);
+}
+
+export function upsertRealtimeCardAssignee(current: CardAssignee[], nextAssignee: CardAssignee): CardAssignee[] {
+  if (nextAssignee.id) {
+    const byIdIndex = current.findIndex((assignee) => assignee.id === nextAssignee.id);
+    if (byIdIndex >= 0) {
+      const existing = current[byIdIndex];
+      const next = [...current];
+      next[byIdIndex] = {
+        ...existing,
+        ...nextAssignee,
+        id: nextAssignee.id ?? existing.id,
+      };
+      return next;
+    }
+  }
+
+  const byPairIndex = current.findIndex(
+    (assignee) => assignee.card_id === nextAssignee.card_id && assignee.user_id === nextAssignee.user_id,
+  );
+  if (byPairIndex >= 0) {
+    const existing = current[byPairIndex];
+    const next = [...current];
+    next[byPairIndex] = {
+      ...existing,
+      ...nextAssignee,
+      id: nextAssignee.id ?? existing.id,
+    };
+    return next;
+  }
+
+  return [...current, nextAssignee];
+}
+
+export function removeRealtimeCardAssignee(
+  current: CardAssignee[],
+  target: { id?: string; card_id?: string; user_id?: string },
+): CardAssignee[] {
+  if (target.id) {
+    const hasAssigneeWithId = current.some((assignee) => assignee.id === target.id);
+    if (hasAssigneeWithId) {
+      return current.filter((assignee) => assignee.id !== target.id);
+    }
+  }
+
+  if (target.card_id && target.user_id) {
+    return current.filter(
+      (assignee) => !(assignee.card_id === target.card_id && assignee.user_id === target.user_id),
+    );
+  }
+
+  return current;
+}
+
+export function upsertRealtimeCardLabel(current: CardLabel[], nextLabel: CardLabel): CardLabel[] {
+  if (nextLabel.id) {
+    const byIdIndex = current.findIndex((label) => label.id === nextLabel.id);
+    if (byIdIndex >= 0) {
+      const existing = current[byIdIndex];
+      const next = [...current];
+      next[byIdIndex] = {
+        ...existing,
+        ...nextLabel,
+        id: nextLabel.id ?? existing.id,
+      };
+      return next;
+    }
+  }
+
+  const byPairIndex = current.findIndex(
+    (label) => label.card_id === nextLabel.card_id && label.label_id === nextLabel.label_id,
+  );
+  if (byPairIndex >= 0) {
+    const existing = current[byPairIndex];
+    const next = [...current];
+    next[byPairIndex] = {
+      ...existing,
+      ...nextLabel,
+      id: nextLabel.id ?? existing.id,
+    };
+    return next;
+  }
+
+  return [...current, nextLabel];
+}
+
+export function removeRealtimeCardLabel(
+  current: CardLabel[],
+  target: { id?: string; card_id?: string; label_id?: string },
+): CardLabel[] {
+  if (target.id) {
+    const hasLabelWithId = current.some((label) => label.id === target.id);
+    if (hasLabelWithId) {
+      return current.filter((label) => label.id !== target.id);
+    }
+  }
+
+  if (target.card_id && target.label_id) {
+    return current.filter((label) => !(label.card_id === target.card_id && label.label_id === target.label_id));
+  }
+
+  return current;
+}
+
+export function upsertRealtimeCardCustomFieldValue(
+  current: CardCustomFieldValue[],
+  nextValue: CardCustomFieldValue,
+): CardCustomFieldValue[] {
+  const byIdIndex = current.findIndex((value) => value.id === nextValue.id);
+  if (byIdIndex >= 0) {
+    const next = [...current];
+    next[byIdIndex] = nextValue;
+    return next;
+  }
+
+  const byPairIndex = current.findIndex(
+    (value) => value.card_id === nextValue.card_id && value.custom_field_id === nextValue.custom_field_id,
+  );
+  if (byPairIndex >= 0) {
+    const next = [...current];
+    next[byPairIndex] = nextValue;
+    return next;
+  }
+
+  return [...current, nextValue];
+}
+
+export function removeRealtimeCardCustomFieldValue(
+  current: CardCustomFieldValue[],
+  target: { id?: string; card_id?: string; custom_field_id?: string },
+): CardCustomFieldValue[] {
+  if (target.id) {
+    const hasValueWithId = current.some((value) => value.id === target.id);
+    if (hasValueWithId) {
+      return current.filter((value) => value.id !== target.id);
+    }
+  }
+
+  if (target.card_id && target.custom_field_id) {
+    return current.filter(
+      (value) => !(value.card_id === target.card_id && value.custom_field_id === target.custom_field_id),
+    );
+  }
+
+  return current;
+}
+
+export function upsertRealtimeLabel(current: Label[], nextLabel: Label): Label[] {
+  const index = current.findIndex((label) => label.id === nextLabel.id);
+  if (index === -1) {
+    return [...current, nextLabel];
+  }
+  const next = [...current];
+  next[index] = nextLabel;
+  return next;
+}
+
+export function removeRealtimeLabel(current: Label[], labelId: string): Label[] {
+  return current.filter((label) => label.id !== labelId);
+}
+
+export function upsertRealtimeCustomField(current: CustomField[], nextField: CustomField): CustomField[] {
+  const index = current.findIndex((field) => field.id === nextField.id);
+  if (index === -1) {
+    return [...current, nextField];
+  }
+  const next = [...current];
+  next[index] = nextField;
+  return next;
+}
+
+export function removeRealtimeCustomField(current: CustomField[], customFieldId: string): CustomField[] {
+  return current.filter((field) => field.id !== customFieldId);
 }
 
 export function upsertRealtimeCardWatcher(current: CardWatcher[], nextWatcher: CardWatcher): CardWatcher[] {

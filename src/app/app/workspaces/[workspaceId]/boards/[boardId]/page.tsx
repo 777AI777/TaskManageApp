@@ -96,11 +96,11 @@ export default async function BoardPage({
             }>,
           }),
       cardIds.length
-        ? supabase.from("card_assignees").select("card_id, user_id").in("card_id", cardIds)
-        : Promise.resolve({ data: [] as Array<{ card_id: string; user_id: string }> }),
+        ? supabase.from("card_assignees").select("id, card_id, user_id").in("card_id", cardIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; card_id: string; user_id: string }> }),
       cardIds.length
-        ? supabase.from("card_labels").select("card_id, label_id").in("card_id", cardIds)
-        : Promise.resolve({ data: [] as Array<{ card_id: string; label_id: string }> }),
+        ? supabase.from("card_labels").select("id, card_id, label_id").in("card_id", cardIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; card_id: string; label_id: string }> }),
     ]);
 
   const customFieldIds = (customFields ?? []).map((field) => field.id);
